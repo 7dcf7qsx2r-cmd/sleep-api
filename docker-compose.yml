@@ -1,0 +1,31 @@
+version: "3.8"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sleep-api
+    ports:
+      - "8787:8787"
+    environment:
+      - NODE_ENV=production
+      - PORT=8787
+      - DATABASE_URL=${DATABASE_URL}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-30d}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_API_URL=${DEEPSEEK_API_URL:-https://api.deepseek.com/v1/chat/completions}
+      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-chat}
+      - SENTRY_DSN=${SENTRY_DSN}
+      - QUOTA_GUEST_CHAT=${QUOTA_GUEST_CHAT:-15}
+      - QUOTA_GUEST_INTERPRET=${QUOTA_GUEST_INTERPRET:-2}
+      - QUOTA_USER_CHAT=${QUOTA_USER_CHAT:-80}
+      - QUOTA_USER_INTERPRET=${QUOTA_USER_INTERPRET:-10}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:8787/health', (r) => r.statusCode === 200 ? process.exit(0) : process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

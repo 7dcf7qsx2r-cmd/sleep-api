@@ -1,0 +1,119 @@
+stages:
+  - build
+  - deploy
+
+variables:
+  # Gitee 镜像仓库地址
+  DOCKER_IMAGE: registry.cn-shenzhen.aliyuncs.com/xiaomian/sleep-api:$CI_COMMIT_SHA
+  DOCKER_IMAGE_LATEST: registry.cn-shenzhen.aliyuncs.com/xiaomian/sleep-api:latest
+  # 服务器配置
+  SERVER_HOST: 106.53.168.166
+  SERVER_PORT: 22
+  SERVER_USER: ubuntu
+
+# ========== 构建阶段 ==========
+build:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker build -t $DOCKER_IMAGE -t $DOCKER_IMAGE_LATEST .
+    # 如需推送到阿里云 ACR，取消下面注释并配置镜像仓库账号密码
+    # - docker login -u $ALIYUN_REGISTRY_USER -p $ALIYUN_REGISTRY_PASSWORD registry.cn-shenzhen.aliyuncs.com
+    # - docker push $DOCKER_IMAGE
+    # - docker push $DOCKER_IMAGE_LATEST
+  only:
+    - master
+    - main
+
+# ========== 部署阶段（SSH 直连） ==========
+deploy:
+  stage: deploy
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache openssh-client curl
+    - mkdir -p ~/.ssh
+    - echo "$SERVER_SSH_KEY" > ~/.ssh/id_rsa
+    - chmod 600 ~/.ssh/id_rsa
+    - ssh-keyscan -H -p $SERVER_PORT $SERVER_HOST >> ~/.ssh/known_hosts
+  script:
+    - |
+      ssh -o StrictHostKeyChecking=no -p $SERVER_PORT $SERVER_USER@$SERVER_HOST << EOF
+        set -e
+        echo "[deploy] 开始部署 sleep-api..."
+
+        # 创建工作目录
+        mkdir -p ~/sleep-api-deploy
+        cd ~/sleep-api-deploy
+
+        echo "[deploy] 保存 docker-compose.yml..."
+        cat > docker-compose.yml << 'COMPOSE'
+        version: "3.8"
+        services:
+          app:
+            image: ${DOCKER_IMAGE}
+            container_name: sleep-api
+            ports:
+              - "8787:8787"
+            environment:
+              - NODE_ENV=production
+              - PORT=8787
+              - DATABASE_URL=${DATABASE_URL}
+              - JWT_SECRET=${JWT_SECRET}
+              - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-30d}
+              - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+              - DEEPSEEK_API_URL=${DEEPSEEK_API_URL:-https://api.deepseek.com/v1/chat/completions}
+              - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-chat}
+              - SENTRY_DSN=${SENTRY_DSN}
+              - QUOTA_GUEST_CHAT=${QUOTA_GUEST_CHAT:-15}
+              - QUOTA_GUEST_INTERPRET=${QUOTA_GUEST_INTERPRET:-2}
+              - QUOTA_USER_CHAT=${QUOTA_USER_CHAT:-80}
+              - QUOTA_USER_INTERPRET=${QUOTA_USER_INTERPRET:-10}
+            restart: unless-stopped
+            healthcheck:
+              test: ["CMD", "node", "-e", "require('http').get('http://localhost:8787/health', (r) => r.statusCode === 200 ? process.exit(0) : process.exit(1))"]
+              interval: 30s
+              timeout: 5s
+              retries: 3
+              start_period: 10s
+        COMPOSE
+
+        echo "[deploy] 备份当前容器..."
+        docker stop sleep-api-backup 2>/dev/null || true
+        docker rm -f sleep-api-backup 2>/dev/null || true
+        docker rename sleep-api sleep-api-backup 2>/dev/null || true
+
+        echo "[deploy] 拉取最新镜像..."
+        # 如果使用本地构建的镜像，这里改成 docker load 或直接从构建机 scp
+        # 当前方案：在服务器上直接构建
+        cd ~/sleep-api-deploy
+
+        echo "[deploy] 使用 docker-compose 启动..."
+        docker-compose up -d app
+
+        echo "[deploy] 健康检查..."
+        sleep 8
+        for i in 1 2 3 4 5; do
+          if curl -sf http://localhost:8787/health > /dev/null; then
+            echo "[deploy] 健康检查通过 ✅"
+            docker rm -f sleep-api-backup 2>/dev/null || true
+            echo "[deploy] 部署完成 🎉"
+            exit 0
+          fi
+          echo "[deploy] 健康检查重试 (\$i/5)..."
+          sleep 3
+        done
+
+        echo "[deploy] 健康检查失败，回滚..."
+        docker-compose down 2>/dev/null || true
+        docker stop sleep-api 2>/dev/null || true
+        docker rm -f sleep-api 2>/dev/null || true
+        docker rename sleep-api-backup sleep-api 2>/dev/null || true
+        docker start sleep-api 2>/dev/null || true
+        echo "[deploy] 已回滚到旧版本"
+        exit 1
+      EOF
+  only:
+    - master
+    - main
