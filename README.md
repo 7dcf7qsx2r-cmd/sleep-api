@@ -134,3 +134,4 @@ EXPO_PUBLIC_API_URL=http://localhost:8787
 | POST | `/social/feed/:id/like` | 点赞/取消 |
 | POST | `/push/register` | 注册推送设备 |
 | POST | `/push/unregister` | 注销推送设备 |
+
