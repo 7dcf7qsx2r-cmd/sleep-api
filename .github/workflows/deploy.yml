@@ -1,0 +1,67 @@
+name: Deploy to Server
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SERVER_SSH_KEY }}
+
+      - name: Deploy to server
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          FCM_SERVER_KEY: ${{ secrets.FCM_SERVER_KEY }}
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new -p 22 ubuntu@106.53.168.166 << 'REMOTE'
+            set -e
+            cd ~/sleep-api || mkdir -p ~/sleep-api && cd ~/sleep-api
+
+            # Pull latest code
+            if [ -d .git ]; then
+              git fetch origin main
+              git reset --hard origin/main
+            else
+              git clone https://github.com/7dcf7qsx2r-cmd/sleep-api.git . --depth 1
+            fi
+
+            # Write env
+            cat > .env << EOF
+            NODE_ENV=production
+            PORT=8787
+            DATABASE_URL=${{ secrets.DATABASE_URL }}
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
+            FCM_SERVER_KEY=${{ secrets.FCM_SERVER_KEY }}
+            EOF
+
+            # Build and run
+            docker-compose down || true
+            docker-compose up --build -d
+
+            # Wait for health
+            sleep 8
+            HEALTH=$(curl -sf http://localhost:8787/health || echo "FAIL")
+            if [ "$HEALTH" = "FAIL" ]; then
+              echo "Health check failed"
+              docker-compose logs --tail 50
+              exit 1
+            fi
+            echo "Deploy OK"
+          REMOTE
+
+      - name: Health check
+        run: |
+          sleep 5
+          curl -sf http://106.53.168.166:8787/health || exit 1
+          echo "Server is healthy"
