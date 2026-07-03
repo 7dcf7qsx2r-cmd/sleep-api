@@ -15,6 +15,7 @@ healthRoutes.get('/', (c) =>
       ai: '/ai/chat · /ai/dream/interpret',
       energy: '/energy/account · /energy/spend · /energy/tasks',
       shop: '/shop/products · /shop/purchase',
+      radar: '/api/radar/datapost · /api/radar/latest · /api/radar/report',
     },
     app: '请在浏览器打开 http://localhost:8081 使用小眠 App',
   }),

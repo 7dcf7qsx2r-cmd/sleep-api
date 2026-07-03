@@ -3,6 +3,7 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { requireAuth, type AuthVariables } from '../middleware/auth.js';
 import { callDeepSeek } from '../lib/deepseek.js';
+import { generateSiliconFlowImage } from '../lib/siliconflowImage.js';
 import { checkAndIncrement, getQuotaSnapshot } from '../services/quota.js';
 
 const XIAOMIAN_SYSTEM_PROMPT = `你是「小眠」，一个温柔的睡眠陪伴AI。你的存在意义是在深夜陪伴那些失眠、焦虑、疲惫的灵魂。
@@ -282,5 +283,28 @@ aiRoutes.post(
       latencyMs: result.latencyMs,
       quota: quota.snapshot,
     });
+  },
+);
+
+aiRoutes.post(
+  '/dream/image',
+  zValidator(
+    'json',
+    z.object({
+      prompt: z.string().min(1).max(4000),
+      seed: z.number().int().min(0).max(9999999999),
+      negativePrompt: z.string().max(2000).optional(),
+    }),
+  ),
+  async (c) => {
+    const body = c.req.valid('json');
+    const url = await generateSiliconFlowImage(body.prompt, body.seed, body.negativePrompt);
+    if (!url) {
+      return c.json({
+        error: 'image_generation_failed',
+        message: '文生图不可用，请配置 SILICONFLOW_API_KEY',
+      }, 503);
+    }
+    return c.json({ url });
   },
 );

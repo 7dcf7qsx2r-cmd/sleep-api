@@ -23,7 +23,10 @@ export const config = {
   deepseekApiKey: process.env.DEEPSEEK_API_KEY ?? '',
   deepseekApiUrl: process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/v1/chat/completions',
   deepseekModel: process.env.DEEPSEEK_MODEL ?? 'deepseek-chat',
+  siliconflowApiKey: process.env.SILICONFLOW_API_KEY ?? '',
   sentryDsn: process.env.SENTRY_DSN ?? '',
+  /** 厂商推送雷达数据时的 Bearer Token；留空则不校验（开发环境） */
+  radarPushSecret: process.env.RADAR_PUSH_SECRET ?? '',
   quota: {
     guestChat: intEnv('QUOTA_GUEST_CHAT', 15),
     guestInterpret: intEnv('QUOTA_GUEST_INTERPRET', 2),

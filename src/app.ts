@@ -9,6 +9,7 @@ import { energyRoutes } from './routes/energy.js';
 import { shopRoutes } from './routes/shop.js';
 import { socialRoutes } from './routes/social.js';
 import { pushRoutes } from './routes/push.js';
+import { radarRoutes } from './routes/radar.js';
 
 export function createApp() {
   const app = new Hono();
@@ -41,6 +42,7 @@ export function createApp() {
   app.route('/shop', shopRoutes);
   app.route('/social', socialRoutes);
   app.route('/push', pushRoutes);
+  app.route('/api/radar', radarRoutes);
 
   app.notFound((c) => c.json({ error: 'not_found' }, 404));
   app.onError((err, c) => {

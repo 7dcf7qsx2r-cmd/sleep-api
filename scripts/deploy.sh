@@ -29,11 +29,13 @@ docker run -d \
   -e DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY}" \
   -e DEEPSEEK_API_URL="${DEEPSEEK_API_URL:-https://api.deepseek.com/v1/chat/completions}" \
   -e DEEPSEEK_MODEL="${DEEPSEEK_MODEL:-deepseek-chat}" \
+  -e SILICONFLOW_API_KEY="${SILICONFLOW_API_KEY}" \
   -e SENTRY_DSN="${SENTRY_DSN}" \
   -e QUOTA_GUEST_CHAT="${QUOTA_GUEST_CHAT:-15}" \
   -e QUOTA_GUEST_INTERPRET="${QUOTA_GUEST_INTERPRET:-2}" \
   -e QUOTA_USER_CHAT="${QUOTA_USER_CHAT:-80}" \
   -e QUOTA_USER_INTERPRET="${QUOTA_USER_INTERPRET:-10}" \
+  -e RADAR_PUSH_SECRET="${RADAR_PUSH_SECRET:-}" \
   "${IMAGE_NAME}"
 
 echo "[deploy] 健康检查..."
