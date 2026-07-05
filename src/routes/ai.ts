@@ -4,6 +4,9 @@ import { z } from 'zod';
 import { requireAuth, type AuthVariables } from '../middleware/auth.js';
 import { callDeepSeek } from '../lib/deepseek.js';
 import { generateSiliconFlowImage } from '../lib/siliconflowImage.js';
+import { synthesizeSiliconFlowSpeech, fetchSiliconFlowSpeechStream } from '../lib/siliconflowTts.js';
+import { transcribeSiliconFlowAudio } from '../lib/siliconflowStt.js';
+import { createTtsStreamSession, consumeTtsStreamSession } from '../lib/ttsStreamSession.js';
 import { checkAndIncrement, getQuotaSnapshot } from '../services/quota.js';
 
 const XIAOMIAN_SYSTEM_PROMPT = `你是「小眠」，一个温柔的睡眠陪伴AI。你的存在意义是在深夜陪伴那些失眠、焦虑、疲惫的灵魂。
@@ -150,6 +153,36 @@ const imagerySchema = z.array(
 
 export const aiRoutes = new Hono<{ Variables: AuthVariables }>();
 
+/** 原生播放器无法带 Authorization，用一次性 session token 鉴权 */
+aiRoutes.get('/tts/stream/:sessionId', async (c) => {
+  const sessionId = c.req.param('sessionId');
+  const token = c.req.query('token') ?? '';
+  const payload = consumeTtsStreamSession(sessionId, token);
+  if (!payload) {
+    return c.json({ error: 'stream_session_invalid' }, 404);
+  }
+
+  const upstream = await fetchSiliconFlowSpeechStream(payload.input, {
+    speed: payload.speed,
+    voice: payload.voice,
+    gain: payload.gain,
+  });
+  if (!upstream?.body) {
+    return c.json({
+      error: 'tts_stream_failed',
+      message: '流式语音合成不可用',
+    }, 503);
+  }
+
+  return new Response(upstream.body, {
+    headers: {
+      'Content-Type': 'audio/mpeg',
+      'Cache-Control': 'no-store',
+      'Transfer-Encoding': 'chunked',
+    },
+  });
+});
+
 aiRoutes.use('*', requireAuth);
 
 aiRoutes.get('/quota', async (c) => {
@@ -292,13 +325,15 @@ aiRoutes.post(
     'json',
     z.object({
       prompt: z.string().min(1).max(4000),
-      seed: z.number().int().min(0).max(9999999999),
+      seed: z.number().int().min(0).transform((s) => s % 9999999999),
       negativePrompt: z.string().max(2000).optional(),
     }),
   ),
   async (c) => {
     const body = c.req.valid('json');
-    const url = await generateSiliconFlowImage(body.prompt, body.seed, body.negativePrompt);
+    const prompt = body.prompt.slice(0, 4000);
+    const negativePrompt = body.negativePrompt?.slice(0, 2000);
+    const url = await generateSiliconFlowImage(prompt, body.seed, negativePrompt);
     if (!url) {
       return c.json({
         error: 'image_generation_failed',
@@ -308,3 +343,86 @@ aiRoutes.post(
     return c.json({ url });
   },
 );
+
+aiRoutes.post(
+  '/tts/speech',
+  zValidator(
+    'json',
+    z.object({
+      input: z.string().min(1).max(2000),
+      speed: z.number().min(0.5).max(2).optional(),
+      voice: z.string().max(200).optional(),
+      gain: z.number().min(-10).max(10).optional(),
+    }),
+  ),
+  async (c) => {
+    const body = c.req.valid('json');
+    const bytes = await synthesizeSiliconFlowSpeech(body.input, {
+      speed: body.speed,
+      voice: body.voice,
+      gain: body.gain,
+    });
+    if (!bytes?.byteLength) {
+      return c.json({
+        error: 'tts_failed',
+        message: '语音合成不可用，请配置 SILICONFLOW_API_KEY',
+      }, 503);
+    }
+    return new Response(bytes, {
+      headers: {
+        'Content-Type': 'audio/mpeg',
+        'Cache-Control': 'private, max-age=3600',
+      },
+    });
+  },
+);
+
+aiRoutes.post(
+  '/tts/stream/session',
+  zValidator(
+    'json',
+    z.object({
+      input: z.string().min(1).max(2000),
+      speed: z.number().min(0.5).max(2).optional(),
+      voice: z.string().max(200).optional(),
+      gain: z.number().min(-10).max(10).optional(),
+    }),
+  ),
+  async (c) => {
+    const body = c.req.valid('json');
+    const { sessionId, token } = createTtsStreamSession({
+      input: body.input,
+      speed: body.speed,
+      voice: body.voice,
+      gain: body.gain,
+    });
+    return c.json({ sessionId, token });
+  },
+);
+
+aiRoutes.post('/stt/transcribe', async (c) => {
+  const form = await c.req.formData();
+  const file = form.get('file');
+  if (!file || typeof file === 'string') {
+    return c.json({ error: 'no_file', message: '请上传音频文件' }, 400);
+  }
+
+  const bytes = await file.arrayBuffer();
+  if (!bytes.byteLength) {
+    return c.json({ error: 'empty_file', message: '音频为空' }, 400);
+  }
+
+  const text = await transcribeSiliconFlowAudio(
+    bytes,
+    file.name || 'voice.m4a',
+    file.type || 'audio/mp4',
+  );
+  if (!text) {
+    return c.json({
+      error: 'stt_failed',
+      message: '语音识别不可用，请配置 SILICONFLOW_API_KEY',
+    }, 503);
+  }
+
+  return c.json({ text });
+});

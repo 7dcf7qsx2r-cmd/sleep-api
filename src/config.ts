@@ -27,6 +27,25 @@ export const config = {
   sentryDsn: process.env.SENTRY_DSN ?? '',
   /** 厂商推送雷达数据时的 Bearer Token；留空则不校验（开发环境） */
   radarPushSecret: process.env.RADAR_PUSH_SECRET ?? '',
+  sms: {
+    secretId: process.env.TENCENT_SMS_SECRET_ID ?? '',
+    secretKey: process.env.TENCENT_SMS_SECRET_KEY ?? '',
+    sdkAppId: process.env.TENCENT_SMS_SDK_APP_ID ?? '',
+    signName: process.env.TENCENT_SMS_SIGN_NAME ?? '',
+    templateId: process.env.TENCENT_SMS_TEMPLATE_ID ?? '',
+    region: process.env.TENCENT_SMS_REGION ?? 'ap-guangzhou',
+    mock: process.env.SMS_MOCK === '1' || process.env.SMS_MOCK === 'true',
+    mockCode: process.env.SMS_MOCK_CODE ?? '123456',
+    codeTtlSec: intEnv('SMS_CODE_TTL_SEC', 300),
+    sendIntervalSec: intEnv('SMS_SEND_INTERVAL_SEC', 60),
+    dailyLimitPerPhone: intEnv('SMS_DAILY_LIMIT_PER_PHONE', 10),
+    hourlyLimitPerIp: intEnv('SMS_HOURLY_LIMIT_PER_IP', 20),
+    maxAttempts: intEnv('SMS_MAX_VERIFY_ATTEMPTS', 5),
+  },
+  wechat: {
+    appId: process.env.WECHAT_APP_ID ?? '',
+    appSecret: process.env.WECHAT_APP_SECRET ?? '',
+  },
   quota: {
     guestChat: intEnv('QUOTA_GUEST_CHAT', 15),
     guestInterpret: intEnv('QUOTA_GUEST_INTERPRET', 2),

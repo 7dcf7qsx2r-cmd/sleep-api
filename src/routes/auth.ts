@@ -1,12 +1,23 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
-import { createGuestSession, loginWithPassword } from '../services/auth.js';
+import { createGuestSession, loginOrRegisterByPhone, loginOrRegisterByWeChat, loginWithPassword, getUserAccountProfile } from '../services/auth.js';
 import { copyBlobsFromGuestToUser } from '../services/dataBlob.js';
 import { ensureEnergyAccount } from '../services/energy.js';
 import { verifyToken } from '../lib/jwt.js';
+import { normalizePhone, maskPhone } from '../lib/phone.js';
+import { issueAndSendCode, SmsRateLimitError, verifyCode } from '../services/sms/codeStore.js';
+import { isSmsConfigured } from '../services/sms/tencentSms.js';
+import { exchangeWeChatCode, fetchWeChatUserInfo, isWeChatConfigured } from '../services/wechat.js';
+import { requireAuth, type AuthVariables } from '../middleware/auth.js';
 
-export const authRoutes = new Hono();
+export const authRoutes = new Hono<{ Variables: AuthVariables }>();
+
+function clientIp(c: { req: { header: (name: string) => string | undefined } }): string | undefined {
+  const forwarded = c.req.header('x-forwarded-for');
+  if (forwarded) return forwarded.split(',')[0]?.trim();
+  return c.req.header('x-real-ip');
+}
 
 authRoutes.post(
   '/guest',
@@ -53,6 +64,122 @@ authRoutes.post(
     });
   },
 );
+
+authRoutes.post(
+  '/sms/send',
+  zValidator(
+    'json',
+    z.object({
+      phone: z.string().min(11).max(20),
+    }),
+  ),
+  async (c) => {
+    if (!isSmsConfigured()) {
+      return c.json({ error: 'sms_not_configured', message: '短信服务未配置' }, 503);
+    }
+    const phone = normalizePhone(c.req.valid('json').phone);
+    if (!phone) {
+      return c.json({ error: 'invalid_phone', message: '请输入有效的中国大陆手机号' }, 400);
+    }
+    try {
+      const { expiresIn } = await issueAndSendCode(phone, clientIp(c));
+      return c.json({ ok: true, expiresIn, phone: maskPhone(phone) });
+    } catch (err) {
+      if (err instanceof SmsRateLimitError) {
+        return c.json({ error: 'rate_limited', message: err.message }, 429);
+      }
+      console.error('[auth/sms/send]', err);
+      return c.json({ error: 'sms_send_failed', message: '验证码发送失败，请稍后重试' }, 502);
+    }
+  },
+);
+
+authRoutes.post(
+  '/sms/login',
+  zValidator(
+    'json',
+    z.object({
+      phone: z.string().min(11).max(20),
+      code: z.string().regex(/^\d{6}$/),
+    }),
+  ),
+  async (c) => {
+    const { phone: rawPhone, code } = c.req.valid('json');
+    const phone = normalizePhone(rawPhone);
+    if (!phone) {
+      return c.json({ error: 'invalid_phone', message: '请输入有效的中国大陆手机号' }, 400);
+    }
+
+    const ok = await verifyCode(phone, code);
+    if (!ok) {
+      return c.json({ error: 'invalid_code', message: '验证码错误或已过期' }, 401);
+    }
+
+    const result = await loginOrRegisterByPhone(phone);
+    return c.json({
+      token: result.token,
+      userId: result.userId,
+      username: result.username,
+      phone: maskPhone(result.phone),
+      isNewUser: result.isNewUser,
+      subjectType: 'user',
+      expiresIn: process.env.JWT_EXPIRES_IN ?? '30d',
+    });
+  },
+);
+
+authRoutes.post(
+  '/wechat/login',
+  zValidator(
+    'json',
+    z.object({
+      code: z.string().min(1).max(512),
+    }),
+  ),
+  async (c) => {
+    if (!isWeChatConfigured()) {
+      return c.json({ error: 'wechat_not_configured', message: '微信登录未配置' }, 503);
+    }
+
+    const { code } = c.req.valid('json');
+    try {
+      const tokenInfo = await exchangeWeChatCode(code);
+      const profile = await fetchWeChatUserInfo(tokenInfo.accessToken, tokenInfo.openid);
+      const result = await loginOrRegisterByWeChat({
+        openid: tokenInfo.openid,
+        unionid: tokenInfo.unionid,
+        nickname: profile?.nickname,
+        avatarUrl: profile?.headimgurl,
+      });
+      await ensureEnergyAccount(result.userId);
+      return c.json({
+        token: result.token,
+        userId: result.userId,
+        username: result.username,
+        nickname: result.nickname,
+        avatarUrl: result.avatarUrl,
+        isNewUser: result.isNewUser,
+        subjectType: 'user',
+        expiresIn: process.env.JWT_EXPIRES_IN ?? '30d',
+      });
+    } catch (err) {
+      console.error('[auth/wechat/login]', err);
+      return c.json({ error: 'wechat_login_failed', message: '微信登录失败，请重试' }, 401);
+    }
+  },
+);
+
+authRoutes.get('/me', requireAuth, async (c) => {
+  const auth = c.get('auth');
+  if (auth.type !== 'user') {
+    return c.json({ error: 'user_required' }, 403);
+  }
+  const profile = await getUserAccountProfile(auth.sub);
+  if (!profile) {
+    return c.json({ error: 'not_found' }, 404);
+  }
+  return c.json({ profile });
+});
 
 authRoutes.post(
   '/merge-guest',

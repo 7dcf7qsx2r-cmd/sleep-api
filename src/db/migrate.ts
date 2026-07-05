@@ -231,6 +231,70 @@ const MIGRATION_STATEMENTS = [
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`,
   `CREATE INDEX IF NOT EXISTS idx_radar_reports_mac ON radar_sleep_reports (mac, created_at DESC)`,
+
+  // === 手机号短信登录 ===
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone ON users (phone) WHERE phone IS NOT NULL AND deleted_at IS NULL`,
+
+  `CREATE TABLE IF NOT EXISTS sms_verification_codes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    phone TEXT NOT NULL,
+    code_hash TEXT NOT NULL,
+    purpose TEXT NOT NULL DEFAULT 'login',
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_at TIMESTAMPTZ,
+    attempt_count INT NOT NULL DEFAULT 0,
+    request_ip TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_sms_codes_phone_created ON sms_verification_codes (phone, created_at DESC)`,
+
+  // === 微信登录 ===
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS wechat_unionid TEXT`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS wechat_openid TEXT`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_wechat_unionid ON users (wechat_unionid) WHERE wechat_unionid IS NOT NULL AND deleted_at IS NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_wechat_openid ON users (wechat_openid) WHERE wechat_openid IS NOT NULL AND deleted_at IS NULL`,
+
+  // === 用户状态（管理端）===
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_at TIMESTAMPTZ`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_reason TEXT`,
+  `CREATE INDEX IF NOT EXISTS idx_users_status_created ON users (status, created_at DESC)`,
+
+  // === 用户头像（微信等）===
+  `ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS avatar_url TEXT`,
+
+  // === 管理端：角色 / 管理员 / 审计 ===
+  `CREATE TABLE IF NOT EXISTS admin_roles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT UNIQUE NOT NULL,
+    permissions_json JSONB NOT NULL DEFAULT '[]',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS admin_users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    display_name TEXT NOT NULL DEFAULT '',
+    role_id UUID NOT NULL REFERENCES admin_roles(id),
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+    last_login_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_admin_users_role ON admin_users (role_id)`,
+  `CREATE TABLE IF NOT EXISTS admin_audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    admin_user_id UUID REFERENCES admin_users(id) ON DELETE SET NULL,
+    action TEXT NOT NULL,
+    resource_type TEXT NOT NULL,
+    resource_id TEXT,
+    before_json JSONB,
+    after_json JSONB,
+    ip TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON admin_audit_logs (created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_admin_audit_resource ON admin_audit_logs (resource_type, resource_id)`,
 ];
 
 async function main() {

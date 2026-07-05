@@ -23,6 +23,18 @@ services:
       - QUOTA_GUEST_INTERPRET=${QUOTA_GUEST_INTERPRET:-2}
       - QUOTA_USER_CHAT=${QUOTA_USER_CHAT:-80}
       - QUOTA_USER_INTERPRET=${QUOTA_USER_INTERPRET:-10}
+      - TENCENT_SMS_SECRET_ID=${TENCENT_SMS_SECRET_ID}
+      - TENCENT_SMS_SECRET_KEY=${TENCENT_SMS_SECRET_KEY}
+      - TENCENT_SMS_SDK_APP_ID=${TENCENT_SMS_SDK_APP_ID}
+      - TENCENT_SMS_SIGN_NAME=${TENCENT_SMS_SIGN_NAME}
+      - TENCENT_SMS_TEMPLATE_ID=${TENCENT_SMS_TEMPLATE_ID}
+      - TENCENT_SMS_REGION=${TENCENT_SMS_REGION:-ap-guangzhou}
+      - SMS_MOCK=${SMS_MOCK:-}
+      - SMS_MOCK_CODE=${SMS_MOCK_CODE:-123456}
+      - SMS_CODE_TTL_SEC=${SMS_CODE_TTL_SEC:-300}
+      - SMS_SEND_INTERVAL_SEC=${SMS_SEND_INTERVAL_SEC:-60}
+      - WECHAT_APP_ID=${WECHAT_APP_ID}
+      - WECHAT_APP_SECRET=${WECHAT_APP_SECRET}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:8787/health', (r) => r.statusCode === 200 ? process.exit(0) : process.exit(1))"]

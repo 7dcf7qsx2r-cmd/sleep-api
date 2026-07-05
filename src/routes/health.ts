@@ -10,7 +10,7 @@ healthRoutes.get('/', (c) =>
     status: 'running',
     endpoints: {
       health: '/health',
-      auth: '/auth/guest · /auth/login',
+      auth: '/auth/guest · /auth/login · /auth/sms/send · /auth/sms/login · /auth/wechat/login',
       sync: '/sync/bootstrap · /sync/:domain',
       ai: '/ai/chat · /ai/dream/interpret',
       energy: '/energy/account · /energy/spend · /energy/tasks',
@@ -35,5 +35,10 @@ healthRoutes.get('/health', async (c) => {
     db: dbOk,
     dbBackend: config.usePglite ? 'pglite' : 'postgres',
     deepseekConfigured: Boolean(config.deepseekApiKey),
+    siliconflowConfigured: Boolean(config.siliconflowApiKey),
+    smsConfigured: Boolean(config.sms.mock) || Boolean(
+      config.sms.secretId && config.sms.sdkAppId && config.sms.signName && config.sms.templateId,
+    ),
+    wechatConfigured: Boolean(config.wechat.appId && config.wechat.appSecret),
   });
 });

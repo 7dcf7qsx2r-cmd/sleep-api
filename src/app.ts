@@ -10,6 +10,7 @@ import { shopRoutes } from './routes/shop.js';
 import { socialRoutes } from './routes/social.js';
 import { pushRoutes } from './routes/push.js';
 import { radarRoutes } from './routes/radar.js';
+import { adminRoutes } from './routes/admin/index.js';
 
 export function createApp() {
   const app = new Hono();
@@ -25,6 +26,9 @@ export function createApp() {
           origin.startsWith('http://127.0.0.1:') ||
           origin.startsWith('exp://')
         ) {
+          return origin;
+        }
+        if (origin.includes('xmianai.com')) {
           return origin;
         }
         return origin;
@@ -43,6 +47,7 @@ export function createApp() {
   app.route('/social', socialRoutes);
   app.route('/push', pushRoutes);
   app.route('/api/radar', radarRoutes);
+  app.route('/admin', adminRoutes);
 
   app.notFound((c) => c.json({ error: 'not_found' }, 404));
   app.onError((err, c) => {
