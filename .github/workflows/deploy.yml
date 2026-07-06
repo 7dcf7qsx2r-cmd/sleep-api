@@ -27,12 +27,18 @@ jobs:
             set -e
             cd ~/sleep-api || mkdir -p ~/sleep-api && cd ~/sleep-api
 
-            # Pull latest code
+            # Pull latest code (CI 推 GitHub；服务器 origin 可能指向 Gitee，统一用 github 远端)
+            GITHUB_REPO="https://github.com/7dcf7qsx2r-cmd/sleep-api.git"
             if [ -d .git ]; then
-              git fetch origin main
-              git reset --hard origin/main
+              if git remote | grep -qx github; then
+                git remote set-url github "$GITHUB_REPO"
+              else
+                git remote add github "$GITHUB_REPO"
+              fi
+              git fetch github main
+              git reset --hard github/main
             else
-              git clone https://github.com/7dcf7qsx2r-cmd/sleep-api.git . --depth 1
+              git clone "$GITHUB_REPO" . --depth 1 --branch main
             fi
 
             # Write env
