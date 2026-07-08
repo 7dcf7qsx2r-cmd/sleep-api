@@ -55,14 +55,18 @@ cp secrets/local/production.env.example secrets/local/production.env
 切换后验证：
 
 ```bash
+curl -sI https://xmianai.com/ | head -1
+curl -sI https://admin.xmianai.com/ | head -1
 curl https://api.xmianai.com/health
 ```
 
-切换前可在本机验证新机（强制解析）：
+**官网 / 管理后台迁移**（静态文件在 `/var/www/xiaomian`、`/var/www/xiaomian-admin`）：
 
-```bash
-curl --resolve api.xmianai.com:443:119.29.148.43 https://api.xmianai.com/health
-```
+| 主机记录 | 改为 |
+|---------|------|
+| `@` | 119.29.148.43 |
+| `www` | 119.29.148.43 |
+| `admin` | 119.29.148.43 |
 
 脚本：`scripts/ci/setup-nginx-https.sh`（支持 `--ssl-from-uat` 从旧机复制证书）
 
