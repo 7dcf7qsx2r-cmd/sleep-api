@@ -42,12 +42,29 @@ cp secrets/local/production.env.example secrets/local/production.env
 ./scripts/ci/upload-github-secrets.sh production secrets/local/production.env
 ```
 
-### 4. 触发部署
+### 5. Nginx + HTTPS（api.xmianai.com）
+
+生产 CVM 已安装 Nginx，443 反代至 `127.0.0.1:8787`，证书覆盖 `api.xmianai.com`（有效期至 2026-10-03）。
+
+**切换 DNS（你需在域名控制台操作一次）：**
+
+| 记录 | 类型 | 原值 | 新值 |
+|------|------|------|------|
+| `api` | A | 106.53.168.166 | **119.29.148.43** |
+
+切换后验证：
 
 ```bash
-git push github main      # 生产
-git push github develop   # UAT
+curl https://api.xmianai.com/health
 ```
+
+切换前可在本机验证新机（强制解析）：
+
+```bash
+curl --resolve api.xmianai.com:443:119.29.148.43 https://api.xmianai.com/health
+```
+
+脚本：`scripts/ci/setup-nginx-https.sh`（支持 `--ssl-from-uat` 从旧机复制证书）
 
 ---
 
