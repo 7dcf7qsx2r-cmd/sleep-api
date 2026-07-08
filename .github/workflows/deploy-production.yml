@@ -1,0 +1,82 @@
+name: Deploy Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '119.29.148.43' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      REMOTE_DIR: ${{ vars.REMOTE_DIR || '/root/sleep-api' }}
+      GIT_BRANCH: ${{ vars.GIT_BRANCH || 'main' }}
+      GITHUB_REPO: ${{ vars.GITHUB_REPO || 'https://github.com/7dcf7qsx2r-cmd/sleep-api.git' }}
+      HEALTH_URL: ${{ vars.HEALTH_URL || 'http://119.29.148.43:8787/health' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SERVER_SSH_KEY }}
+
+      - name: Render .env
+        env:
+          NODE_ENV: production
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_EXPIRES_IN: ${{ secrets.JWT_EXPIRES_IN }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_API_URL: ${{ secrets.DEEPSEEK_API_URL }}
+          DEEPSEEK_MODEL: ${{ secrets.DEEPSEEK_MODEL }}
+          SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          RADAR_PUSH_SECRET: ${{ secrets.RADAR_PUSH_SECRET }}
+          WECHAT_APP_ID: ${{ secrets.WECHAT_APP_ID }}
+          WECHAT_APP_SECRET: ${{ secrets.WECHAT_APP_SECRET }}
+          TENCENT_SMS_SECRET_ID: ${{ secrets.TENCENT_SMS_SECRET_ID }}
+          TENCENT_SMS_SECRET_KEY: ${{ secrets.TENCENT_SMS_SECRET_KEY }}
+          TENCENT_SMS_SDK_APP_ID: ${{ secrets.TENCENT_SMS_SDK_APP_ID }}
+          TENCENT_SMS_SIGN_NAME: ${{ secrets.TENCENT_SMS_SIGN_NAME }}
+          TENCENT_SMS_TEMPLATE_ID: ${{ secrets.TENCENT_SMS_TEMPLATE_ID }}
+          TENCENT_SMS_REGION: ${{ secrets.TENCENT_SMS_REGION }}
+          SMS_MOCK: ${{ secrets.SMS_MOCK }}
+          FCM_SERVER_KEY: ${{ secrets.FCM_SERVER_KEY }}
+          FCM_PROJECT_ID: ${{ secrets.FCM_PROJECT_ID }}
+        run: |
+          chmod +x scripts/ci/render-dotenv.sh
+          ./scripts/ci/render-dotenv.sh > .env.deploy
+
+      - name: Upload code and env
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new -p "$SERVER_PORT" "${SERVER_USER}@${SERVER_HOST}" "mkdir -p '${REMOTE_DIR}'"
+          rsync -az --delete \
+            --exclude node_modules \
+            --exclude data \
+            --exclude .env \
+            --exclude dist \
+            --exclude .git \
+            -e "ssh -o StrictHostKeyChecking=no -p ${SERVER_PORT}" \
+            ./ "${SERVER_USER}@${SERVER_HOST}:${REMOTE_DIR}/"
+          scp -P "$SERVER_PORT" -o StrictHostKeyChecking=no .env.deploy "${SERVER_USER}@${SERVER_HOST}:${REMOTE_DIR}/.env"
+
+      - name: Deploy on server
+        run: |
+          ssh -o StrictHostKeyChecking=no -p "$SERVER_PORT" "${SERVER_USER}@${SERVER_HOST}" \
+            "REMOTE_DIR='${REMOTE_DIR}' GITHUB_REPO='${GITHUB_REPO}' GIT_BRANCH='${GIT_BRANCH}' bash -s" \
+            < scripts/ci/deploy-remote.sh
+
+      - name: External health check
+        run: curl -sf "$HEALTH_URL"

@@ -3,3 +3,7 @@ dist/
 .env
 data/
 *.log
+docs/项目登录方式.md
+secrets/local/*
+!secrets/local/*.example
+.env.deploy

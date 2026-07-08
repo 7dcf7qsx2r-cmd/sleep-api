@@ -1,6 +1,57 @@
 # 小眠 sleep-api 部署指南
 
-## 方案一：Gitee 流水线 + SSH 直连（推荐）
+## 架构说明
+
+| 环境 | 服务器 | 数据库 |
+|------|--------|--------|
+| **UAT** | 106.53.168.166 | 独立库或隧道（见 GitHub `uat` Environment） |
+| **Production** | 119.29.148.43 | **腾讯云独立 PostgreSQL** `172.16.0.12:5432/sleep`（与 CVM 同 VPC 内网，详见 `docs/项目登录方式.md`） |
+
+生产环境 **不在 CVM 上安装 PostgreSQL**，应用容器通过内网连接云数据库。
+
+---
+
+## 方案一：GitHub Actions 双环境（推荐 · 2026-07）
+
+### 1. 生产服务器首次初始化
+
+```bash
+ssh -i ~/.ssh/xiaomian-txy.pem root@119.29.148.43 'bash -s' < scripts/ci/bootstrap-prd-server.sh
+```
+
+业务库连接串（密码 `/` 须 URL 编码为 `%2F`）：
+
+```
+postgresql://admin:****@172.16.0.12:5432/sleep
+```
+
+### 2. GitHub Environments
+
+详见 **[docs/github-environments.md](docs/github-environments.md)**：
+
+- `uat` → 推 `develop` 分支自动部署
+- `production` → 推 `main` 分支自动部署
+
+每个 Environment 单独配置 `DATABASE_URL`、`JWT_SECRET`、`SERVER_SSH_KEY` 等 Secrets。
+
+### 3. 本地一键上传 Secrets（需 `gh auth login`）
+
+```bash
+cp secrets/local/production.env.example secrets/local/production.env
+# 填入独立库连接串与密钥
+./scripts/ci/upload-github-secrets.sh production secrets/local/production.env
+```
+
+### 4. 触发部署
+
+```bash
+git push github main      # 生产
+git push github develop   # UAT
+```
+
+---
+
+## 方案二：Gitee 流水线 + SSH 直连（旧）
 
 ### 1. 服务器准备
 

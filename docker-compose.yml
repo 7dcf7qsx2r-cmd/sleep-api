@@ -6,6 +6,8 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: sleep-api
+    env_file:
+      - .env
     ports:
       - "8787:8787"
     environment:
