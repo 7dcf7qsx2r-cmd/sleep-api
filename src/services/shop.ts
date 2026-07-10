@@ -1,5 +1,5 @@
 import { query } from '../db/client.js';
-import { getShopProduct, SHOP_PRODUCTS, type ShopProduct } from '../config/shopProducts.js';
+import type { ShopProduct } from '../config/shopProducts.js';
 import { spendEnergy } from './energyLedger.js';
 
 interface ShopProductRow {
@@ -146,7 +146,6 @@ export async function listProducts(options: { includeArchived?: boolean } = {}) 
      ${where}
      ORDER BY sort_order ASC, created_at DESC`,
   );
-  if (result.rows.length === 0 && !options.includeArchived) return SHOP_PRODUCTS;
   return result.rows.map(mapProduct);
 }
 
@@ -163,7 +162,7 @@ export async function getProduct(productId: string, options: { includeUnpublishe
   );
   const row = result.rows[0];
   if (row) return mapProduct(row);
-  return options.includeUnpublished ? undefined : getShopProduct(productId);
+  return undefined;
 }
 
 export async function createProduct(input: ShopProductInput) {
