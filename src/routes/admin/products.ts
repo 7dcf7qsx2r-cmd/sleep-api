@@ -22,8 +22,11 @@ function requestIp(c: { req: { header: (name: string) => string | undefined } })
   return c.req.header('x-forwarded-for') ?? c.req.header('x-real-ip');
 }
 
+const productCategorySchema = z.enum(['recommend', 'sleep', 'wellness', 'beauty', 'energy']);
+
 const productSchema = z.object({
   id: z.string().min(1).max(64).optional(),
+  category: productCategorySchema.default('recommend'),
   icon: z.string().max(32).default(''),
   name: z.string().min(1).max(120),
   summary: z.string().max(200).default(''),

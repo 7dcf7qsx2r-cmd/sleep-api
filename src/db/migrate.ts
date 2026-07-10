@@ -107,6 +107,7 @@ const MIGRATION_STATEMENTS = [
   ON shop_orders (user_id, created_at DESC)`,
   `ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS quantity INT NOT NULL DEFAULT 1`,
   `ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS product_snapshot_json JSONB NOT NULL DEFAULT '{}'`,
+  `ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS address_snapshot_json JSONB`,
   `ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
   `CREATE TABLE IF NOT EXISTS shop_order_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -125,6 +126,7 @@ const MIGRATION_STATEMENTS = [
 
   `CREATE TABLE IF NOT EXISTS shop_products (
     id TEXT PRIMARY KEY,
+    category TEXT NOT NULL DEFAULT 'recommend' CHECK (category IN ('recommend', 'sleep', 'wellness', 'beauty', 'energy')),
     icon TEXT NOT NULL DEFAULT '',
     name TEXT NOT NULL,
     summary TEXT NOT NULL DEFAULT '',
@@ -144,8 +146,17 @@ const MIGRATION_STATEMENTS = [
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`,
+  `ALTER TABLE shop_products
+   ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'recommend'`,
+  `ALTER TABLE shop_products
+   DROP CONSTRAINT IF EXISTS shop_products_category_check`,
+  `ALTER TABLE shop_products
+   ADD CONSTRAINT shop_products_category_check
+   CHECK (category IN ('recommend', 'sleep', 'wellness', 'beauty', 'energy'))`,
   `CREATE INDEX IF NOT EXISTS idx_shop_products_status_sort
    ON shop_products (status, sort_order ASC, created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_shop_products_category_status_sort
+   ON shop_products (category, status, sort_order ASC, created_at DESC)`,
 
   `CREATE TABLE IF NOT EXISTS experts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

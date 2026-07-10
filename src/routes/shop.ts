@@ -22,6 +22,13 @@ shopRoutes.get('/orders', async (c) => {
   return c.json({ orders });
 });
 
+const addressSchema = z.object({
+  receiverName: z.string().min(1).max(64),
+  phone: z.string().min(1).max(32),
+  region: z.string().min(1).max(120),
+  detail: z.string().min(1).max(200),
+});
+
 shopRoutes.post(
   '/purchase',
   zValidator(
@@ -30,22 +37,23 @@ shopRoutes.post(
       productId: z.string().max(32),
       quantity: z.number().int().positive().max(99).optional(),
       paymentMethod: z.enum(['energy', 'sandbox_wechat']),
+      address: addressSchema.optional(),
     }),
   ),
   async (c) => {
     const auth = c.get('auth');
     if (auth.type !== 'user') return c.json({ error: 'guest_forbidden' }, 403);
-    const { productId, paymentMethod, quantity } = c.req.valid('json');
+    const { productId, paymentMethod, quantity, address } = c.req.valid('json');
 
     if (paymentMethod === 'energy') {
-      const result = await purchaseWithEnergy(auth.sub, productId, quantity ?? 1);
+      const result = await purchaseWithEnergy(auth.sub, productId, quantity ?? 1, address);
       if (!result.success) {
         return c.json(result, result.error === 'insufficient_balance' ? 400 : 404);
       }
       return c.json(result);
     }
 
-    const result = await purchaseSandboxRmb(auth.sub, productId);
+    const result = await purchaseSandboxRmb(auth.sub, productId, quantity ?? 1, address);
     if (!result.success) return c.json(result, 404);
     return c.json(result);
   },

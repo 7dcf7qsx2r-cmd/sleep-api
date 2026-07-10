@@ -1,5 +1,6 @@
 export interface ShopProduct {
   id: string;
+  category?: 'recommend' | 'sleep' | 'wellness' | 'beauty' | 'energy';
   icon: string;
   name: string;
   summary: string;

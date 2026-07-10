@@ -4,6 +4,7 @@ import { spendEnergy } from './energyLedger.js';
 
 interface ShopProductRow {
   id: string;
+  category: ShopProductCategory;
   icon: string;
   name: string;
   summary: string;
@@ -23,6 +24,7 @@ interface ShopProductRow {
 
 export interface ShopProductInput {
   id?: string;
+  category: ShopProductCategory;
   icon: string;
   name: string;
   summary: string;
@@ -41,6 +43,14 @@ export interface ShopProductInput {
 }
 
 type OrderStatus = 'pending' | 'completed' | 'cancelled' | 'refunded';
+type ShopProductCategory = 'recommend' | 'sleep' | 'wellness' | 'beauty' | 'energy';
+
+export interface ShippingAddressSnapshot {
+  receiverName: string;
+  phone: string;
+  region: string;
+  detail: string;
+}
 
 interface AdminOrderRow {
   id: string;
@@ -57,6 +67,7 @@ interface AdminOrderRow {
   status: OrderStatus;
   created_at: Date;
   updated_at: Date;
+  address_snapshot_json: unknown;
 }
 
 interface OrderEventRow {
@@ -80,6 +91,7 @@ function stringArray(raw: unknown): string[] {
 function mapProduct(row: ShopProductRow): ShopProduct {
   return {
     id: row.id,
+    category: row.category,
     icon: row.icon,
     name: row.name,
     summary: row.summary,
@@ -98,9 +110,20 @@ function mapProduct(row: ShopProductRow): ShopProduct {
   };
 }
 
+function normalizeAddressSnapshot(input?: ShippingAddressSnapshot | null) {
+  if (!input) return null;
+  return {
+    receiverName: input.receiverName?.trim() ?? '',
+    phone: input.phone?.trim() ?? '',
+    region: input.region?.trim() ?? '',
+    detail: input.detail?.trim() ?? '',
+  };
+}
+
 function productSnapshot(product: ShopProduct) {
   return {
     id: product.id,
+    category: product.category,
     name: product.name,
     icon: product.icon,
     summary: product.summary,
@@ -139,7 +162,7 @@ async function writeOrderEvent(params: {
 export async function listProducts(options: { includeArchived?: boolean } = {}) {
   const where = options.includeArchived ? '' : `WHERE status = 'published'`;
   const result = await query<ShopProductRow>(
-    `SELECT id, icon, name, summary, description, ai_reason, shop_name,
+    `SELECT id, category, icon, name, summary, description, ai_reason, shop_name,
             image_slides, details, energy_price, original_energy_price,
             rmb_price, original_rmb_price, stock, status, sort_order
      FROM shop_products
@@ -152,7 +175,7 @@ export async function listProducts(options: { includeArchived?: boolean } = {}) 
 export async function getProduct(productId: string, options: { includeUnpublished?: boolean } = {}) {
   const whereStatus = options.includeUnpublished ? '' : `AND status = 'published'`;
   const result = await query<ShopProductRow>(
-    `SELECT id, icon, name, summary, description, ai_reason, shop_name,
+    `SELECT id, category, icon, name, summary, description, ai_reason, shop_name,
             image_slides, details, energy_price, original_energy_price,
             rmb_price, original_rmb_price, stock, status, sort_order
      FROM shop_products
@@ -169,17 +192,18 @@ export async function createProduct(input: ShopProductInput) {
   const id = input.id?.trim() || `p-${Date.now()}`;
   const result = await query<ShopProductRow>(
     `INSERT INTO shop_products (
-      id, icon, name, summary, description, ai_reason, shop_name, image_slides,
+      id, category, icon, name, summary, description, ai_reason, shop_name, image_slides,
       details, energy_price, original_energy_price, rmb_price, original_rmb_price,
       stock, status, sort_order, published_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10, $11, $12, $13, $14, $15, $16,
-            CASE WHEN $15 = 'published' THEN NOW() ELSE NULL END)
-    RETURNING id, icon, name, summary, description, ai_reason, shop_name, image_slides,
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14, $15, $16, $17,
+            CASE WHEN $16 = 'published' THEN NOW() ELSE NULL END)
+    RETURNING id, category, icon, name, summary, description, ai_reason, shop_name, image_slides,
               details, energy_price, original_energy_price, rmb_price, original_rmb_price,
               stock, status, sort_order`,
     [
       id,
+      input.category,
       input.icon,
       input.name,
       input.summary,
@@ -205,29 +229,31 @@ export async function updateProduct(productId: string, input: ShopProductInput) 
   if (!before) return null;
   const result = await query<ShopProductRow>(
     `UPDATE shop_products SET
-      icon = $2,
-      name = $3,
-      summary = $4,
-      description = $5,
-      ai_reason = $6,
-      shop_name = $7,
-      image_slides = $8::jsonb,
-      details = $9::jsonb,
-      energy_price = $10,
-      original_energy_price = $11,
-      rmb_price = $12,
-      original_rmb_price = $13,
-      stock = $14,
-      status = $15,
-      sort_order = $16,
-      published_at = CASE WHEN $15 = 'published' AND published_at IS NULL THEN NOW() ELSE published_at END,
+      category = $2,
+      icon = $3,
+      name = $4,
+      summary = $5,
+      description = $6,
+      ai_reason = $7,
+      shop_name = $8,
+      image_slides = $9::jsonb,
+      details = $10::jsonb,
+      energy_price = $11,
+      original_energy_price = $12,
+      rmb_price = $13,
+      original_rmb_price = $14,
+      stock = $15,
+      status = $16,
+      sort_order = $17,
+      published_at = CASE WHEN $16 = 'published' AND published_at IS NULL THEN NOW() ELSE published_at END,
       updated_at = NOW()
      WHERE id = $1
-     RETURNING id, icon, name, summary, description, ai_reason, shop_name, image_slides,
+     RETURNING id, category, icon, name, summary, description, ai_reason, shop_name, image_slides,
                details, energy_price, original_energy_price, rmb_price, original_rmb_price,
                stock, status, sort_order`,
     [
       productId,
+      input.category,
       input.icon,
       input.name,
       input.summary,
@@ -257,7 +283,7 @@ export async function setProductStatus(productId: string, status: 'draft' | 'pub
          published_at = CASE WHEN $2 = 'published' AND published_at IS NULL THEN NOW() ELSE published_at END,
          updated_at = NOW()
      WHERE id = $1
-     RETURNING id, icon, name, summary, description, ai_reason, shop_name, image_slides,
+     RETURNING id, category, icon, name, summary, description, ai_reason, shop_name, image_slides,
                details, energy_price, original_energy_price, rmb_price, original_rmb_price,
                stock, status, sort_order`,
     [productId, status],
@@ -265,7 +291,12 @@ export async function setProductStatus(productId: string, status: 'draft' | 'pub
   return { before, after: mapProduct(result.rows[0]!) };
 }
 
-export async function purchaseWithEnergy(userId: string, productId: string, quantity = 1) {
+export async function purchaseWithEnergy(
+  userId: string,
+  productId: string,
+  quantity = 1,
+  addressSnapshot?: ShippingAddressSnapshot | null,
+) {
   const product = await getProduct(productId);
   if (!product) {
     return { success: false, error: 'product_not_found' as const };
@@ -286,10 +317,17 @@ export async function purchaseWithEnergy(userId: string, productId: string, quan
   }
 
   const order = await query<{ id: string }>(
-    `INSERT INTO shop_orders (user_id, product_id, payment_method, quantity, energy_spent, status, product_snapshot_json)
-     VALUES ($1, $2, 'energy', $3, $4, 'completed', $5::jsonb)
+    `INSERT INTO shop_orders (user_id, product_id, payment_method, quantity, energy_spent, status, product_snapshot_json, address_snapshot_json)
+     VALUES ($1, $2, 'energy', $3, $4, 'completed', $5::jsonb, $6::jsonb)
      RETURNING id`,
-    [userId, productId, count, energySpent, JSON.stringify(productSnapshot(product))],
+    [
+      userId,
+      productId,
+      count,
+      energySpent,
+      JSON.stringify(productSnapshot(product)),
+      JSON.stringify(normalizeAddressSnapshot(addressSnapshot)),
+    ],
   );
   await writeOrderEvent({
     orderId: order.rows[0]!.id,
@@ -308,17 +346,30 @@ export async function purchaseWithEnergy(userId: string, productId: string, quan
   };
 }
 
-export async function purchaseSandboxRmb(userId: string, productId: string) {
+export async function purchaseSandboxRmb(
+  userId: string,
+  productId: string,
+  quantity = 1,
+  addressSnapshot?: ShippingAddressSnapshot | null,
+) {
   const product = await getProduct(productId);
   if (!product) {
     return { success: false, error: 'product_not_found' as const };
   }
 
+  const count = Math.max(1, Math.min(quantity, 99));
   const order = await query<{ id: string }>(
-    `INSERT INTO shop_orders (user_id, product_id, payment_method, quantity, rmb_amount, status, product_snapshot_json)
-     VALUES ($1, $2, 'sandbox_wechat', 1, $3, 'completed', $4::jsonb)
+    `INSERT INTO shop_orders (user_id, product_id, payment_method, quantity, rmb_amount, status, product_snapshot_json, address_snapshot_json)
+     VALUES ($1, $2, 'sandbox_wechat', $3, $4, 'completed', $5::jsonb, $6::jsonb)
      RETURNING id`,
-    [userId, productId, product.rmbPrice, JSON.stringify(productSnapshot(product))],
+    [
+      userId,
+      productId,
+      count,
+      product.rmbPrice * count,
+      JSON.stringify(productSnapshot(product)),
+      JSON.stringify(normalizeAddressSnapshot(addressSnapshot)),
+    ],
   );
   await writeOrderEvent({
     orderId: order.rows[0]!.id,
@@ -326,7 +377,7 @@ export async function purchaseSandboxRmb(userId: string, productId: string) {
     afterStatus: 'completed',
     actorType: 'user',
     actorId: userId,
-    metadata: { paymentMethod: 'sandbox_wechat', productId, quantity: 1 },
+    metadata: { paymentMethod: 'sandbox_wechat', productId, quantity: count },
   });
 
   const { ensureEnergyAccount } = await import('./energy.js');
@@ -373,6 +424,17 @@ function maskPhoneForAdmin(phone: string | null): string | null {
   return `${digits.slice(0, 3)}****${digits.slice(-4)}`;
 }
 
+function parseAddressSnapshot(raw: unknown): ShippingAddressSnapshot | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  const receiverName = typeof o.receiverName === 'string' ? o.receiverName.trim() : '';
+  const phone = typeof o.phone === 'string' ? o.phone.trim() : '';
+  const region = typeof o.region === 'string' ? o.region.trim() : '';
+  const detail = typeof o.detail === 'string' ? o.detail.trim() : '';
+  if (!receiverName && !phone && !region && !detail) return null;
+  return { receiverName, phone, region, detail };
+}
+
 function mapAdminOrder(row: AdminOrderRow) {
   return {
     id: row.id,
@@ -387,6 +449,7 @@ function mapAdminOrder(row: AdminOrderRow) {
     energySpent: row.energy_spent,
     rmbAmount: row.rmb_amount != null ? Number(row.rmb_amount) : null,
     status: row.status,
+    address: parseAddressSnapshot(row.address_snapshot_json),
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
@@ -447,7 +510,8 @@ export async function listOrdersForAdmin(params: {
   const result = await query<AdminOrderRow>(
     `SELECT o.id, o.user_id, u.username, p.nickname, u.phone,
             o.product_id, sp.name AS product_name, o.payment_method, o.quantity,
-            o.energy_spent, o.rmb_amount, o.status, o.created_at, o.updated_at
+            o.energy_spent, o.rmb_amount, o.status, o.address_snapshot_json,
+            o.created_at, o.updated_at
      FROM shop_orders o
      JOIN users u ON u.id = o.user_id
      LEFT JOIN user_profiles p ON p.user_id = u.id
@@ -470,8 +534,8 @@ export async function getOrderDetailForAdmin(orderId: string) {
   const order = await query<AdminOrderRow & { product_snapshot_json: unknown }>(
     `SELECT o.id, o.user_id, u.username, p.nickname, u.phone,
             o.product_id, sp.name AS product_name, o.payment_method, o.quantity,
-            o.energy_spent, o.rmb_amount, o.status, o.created_at, o.updated_at,
-            o.product_snapshot_json
+            o.energy_spent, o.rmb_amount, o.status, o.address_snapshot_json,
+            o.created_at, o.updated_at, o.product_snapshot_json
      FROM shop_orders o
      JOIN users u ON u.id = o.user_id
      LEFT JOIN user_profiles p ON p.user_id = u.id
