@@ -2,6 +2,7 @@ node_modules/
 dist/
 .env
 data/
+uploads/
 *.log
 docs/项目登录方式.md
 secrets/local/*

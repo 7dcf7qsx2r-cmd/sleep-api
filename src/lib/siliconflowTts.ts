@@ -11,11 +11,19 @@ export interface SiliconFlowTtsOptions {
   stream?: boolean;
 }
 
+export interface SiliconFlowTtsResult {
+  bytes: ArrayBuffer | null;
+  /** upstream 失败原因（便于区分「未配置 key」与「key 无效/欠费」） */
+  reason?: string;
+}
+
 export async function synthesizeSiliconFlowSpeech(
   input: string,
   options?: SiliconFlowTtsOptions,
-): Promise<ArrayBuffer | null> {
-  if (!config.siliconflowApiKey) return null;
+): Promise<SiliconFlowTtsResult> {
+  if (!config.siliconflowApiKey) {
+    return { bytes: null, reason: 'SILICONFLOW_API_KEY 未配置' };
+  }
 
   try {
     const controller = new AbortController();
@@ -40,14 +48,17 @@ export async function synthesizeSiliconFlowSpeech(
     clearTimeout(timer);
 
     if (!res.ok) {
-      console.warn('[sleep-api] TTS failed:', res.status, await res.text().catch(() => ''));
-      return null;
+      const detail = await res.text().catch(() => '');
+      const reason = `SiliconFlow HTTP ${res.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`;
+      console.warn('[sleep-api] TTS failed:', reason);
+      return { bytes: null, reason };
     }
 
-    return await res.arrayBuffer();
+    return { bytes: await res.arrayBuffer() };
   } catch (e) {
-    console.warn('[sleep-api] TTS error:', e);
-    return null;
+    const reason = e instanceof Error ? e.message : String(e);
+    console.warn('[sleep-api] TTS error:', reason);
+    return { bytes: null, reason };
   }
 }
 

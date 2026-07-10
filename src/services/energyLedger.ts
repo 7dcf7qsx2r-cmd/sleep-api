@@ -31,10 +31,69 @@ async function withClient<T>(fn: (client: import('pg').PoolClient) => Promise<T>
   if (!pool) throw new Error('PG pool not available in PGlite mode');
   const client = await pool.connect();
   try {
-    return await fn(client);
+    await client.query('BEGIN');
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
   } finally {
     client.release();
   }
+}
+
+async function resetDailyEarnedIfNeeded(
+  client: import('pg').PoolClient,
+  userId: string,
+  today = todayStr(),
+): Promise<void> {
+  await client.query(
+    `UPDATE energy_accounts
+     SET daily_earned = 0,
+         daily_earned_date = $2::date,
+         version = version + 1,
+         updated_at = NOW()
+     WHERE user_id = $1
+       AND daily_earned_date <> $2::date`,
+    [userId, today],
+  );
+}
+
+async function getEnergyAccountWithClient(
+  client: import('pg').PoolClient,
+  userId: string,
+): Promise<EnergyAccountDto> {
+  const row = await client.query<{
+    balance: number;
+    total_earned: number;
+    total_spent: number;
+    streak_days: number;
+    max_streak_days: number;
+    daily_earned: number;
+    daily_cap: number;
+    last_check_in: string | null;
+    version: number;
+    updated_at: Date;
+  }>(
+    `SELECT balance, total_earned, total_spent, streak_days, max_streak_days,
+            daily_earned, daily_cap, last_check_in, version, updated_at
+     FROM energy_accounts WHERE user_id = $1`,
+    [userId],
+  );
+  const r = row.rows[0]!;
+  return {
+    balance: r.balance,
+    totalEarned: r.total_earned,
+    totalSpent: r.total_spent,
+    streakDays: r.streak_days,
+    maxStreakDays: r.max_streak_days,
+    dailyEarned: r.daily_earned,
+    dailyCap: r.daily_cap,
+    lastCheckIn: r.last_check_in,
+    version: r.version,
+    updatedAt: r.updated_at.toISOString(),
+  };
 }
 
 export async function listTransactions(userId: string, limit = 50): Promise<EnergyTransactionDto[]> {
@@ -97,8 +156,8 @@ export async function spendEnergy(
 
   return withClient(async (client) => {
     const dup = await client.query(
-      `SELECT id FROM energy_transactions WHERE source_id = $1`,
-      [sourceId],
+      `SELECT id FROM energy_transactions WHERE user_id = $1 AND source_id = $2`,
+      [userId, sourceId],
     );
     if (dup.rows[0]) {
       const account = await ensureEnergyAccount(userId);
@@ -128,7 +187,7 @@ export async function spendEnergy(
       [userId, amount],
     );
 
-    const account = (await getEnergyAccount(userId))!;
+    const account = await getEnergyAccountWithClient(client, userId);
     return { success: true, account };
   });
 }
@@ -146,13 +205,15 @@ export async function earnEnergy(
 
   return withClient(async (client) => {
     const dup = await client.query(
-      `SELECT id FROM energy_transactions WHERE source_id = $1`,
-      [sourceId],
+      `SELECT id FROM energy_transactions WHERE user_id = $1 AND source_id = $2`,
+      [userId, sourceId],
     );
     if (dup.rows[0]) {
       const account = await ensureEnergyAccount(userId);
       return { earned: 0, account, duplicate: true };
     }
+
+    await resetDailyEarnedIfNeeded(client, userId);
 
     const accRow = await client.query<{
       daily_earned: number;
@@ -186,7 +247,7 @@ export async function earnEnergy(
       [userId, earn],
     );
 
-    const account = (await getEnergyAccount(userId))!;
+    const account = await getEnergyAccountWithClient(client, userId);
     return { earned: earn, account };
   });
 }
@@ -203,35 +264,37 @@ export async function completeTask(
 
   const today = todayStr();
 
-  await query(
-    `INSERT INTO energy_task_daily (user_id, task_id, usage_date, completed_count)
-     VALUES ($1, $2, $3::date, 0)
-     ON CONFLICT (user_id, task_id, usage_date) DO NOTHING`,
-    [userId, taskId, today],
-  );
+  const nextCount = await withClient(async (client) => {
+    await client.query(
+      `INSERT INTO energy_task_daily (user_id, task_id, usage_date, completed_count)
+       VALUES ($1, $2, $3::date, 0)
+       ON CONFLICT (user_id, task_id, usage_date) DO NOTHING`,
+      [userId, taskId, today],
+    );
 
-  const row = await query<{ completed_count: number }>(
-    `SELECT completed_count FROM energy_task_daily
-     WHERE user_id = $1 AND task_id = $2 AND usage_date = $3::date`,
-    [userId, taskId, today],
-  );
-  const count = row.rows[0]?.completed_count ?? 0;
-  if (count >= def.dailyLimit) {
+    const row = await client.query<{ completed_count: number }>(
+      `UPDATE energy_task_daily
+       SET completed_count = completed_count + 1
+       WHERE user_id = $1
+         AND task_id = $2
+         AND usage_date = $3::date
+         AND completed_count < $4
+       RETURNING completed_count`,
+      [userId, taskId, today, def.dailyLimit],
+    );
+    return row.rows[0]?.completed_count ?? null;
+  });
+
+  if (nextCount == null) {
     const account = await ensureEnergyAccount(userId);
     return { success: false, earned: 0, account };
   }
-
-  await query(
-    `UPDATE energy_task_daily SET completed_count = completed_count + 1
-     WHERE user_id = $1 AND task_id = $2 AND usage_date = $3::date`,
-    [userId, taskId, today],
-  );
 
   const earn = await earnEnergy(
     userId,
     def.reward,
     `完成任务：${def.name}`,
-    `task:${taskId}:${today}:${count + 1}`,
+    `task:${taskId}:${today}:${nextCount}`,
   );
   return {
     success: earn.earned > 0,
@@ -255,8 +318,8 @@ export async function checkIn(userId: string): Promise<{
 
   return withClient(async (client) => {
     const dup = await client.query(
-      `SELECT id FROM energy_transactions WHERE source_id = $1`,
-      [sourceId],
+      `SELECT id FROM energy_transactions WHERE user_id = $1 AND source_id = $2`,
+      [userId, sourceId],
     );
     if (dup.rows[0]) {
       const account = await ensureEnergyAccount(userId);
@@ -289,13 +352,38 @@ export async function checkIn(userId: string): Promise<{
     await client.query(
       `UPDATE energy_accounts
        SET streak_days = $2, max_streak_days = $3, last_check_in = $4::date,
-           daily_earned = 0, version = version + 1, updated_at = NOW()
+           daily_earned = 0, daily_earned_date = $4::date,
+           version = version + 1, updated_at = NOW()
        WHERE user_id = $1`,
       [userId, streakDays, maxStreak, today],
     );
 
     if (bonus > 0) {
-      await earnEnergy(userId, bonus, `连续打卡${streakDays}天奖励`, sourceId);
+      const accRow = await client.query<{
+        daily_earned: number;
+        daily_cap: number;
+      }>(
+        `SELECT daily_earned, daily_cap FROM energy_accounts WHERE user_id = $1 FOR UPDATE`,
+        [userId],
+      );
+      const dailyEarned = accRow.rows[0]?.daily_earned ?? 0;
+      const dailyCap = accRow.rows[0]?.daily_cap ?? 200;
+      const earned = Math.max(0, Math.min(bonus, dailyCap - dailyEarned));
+      if (earned > 0) {
+        await client.query(
+          `INSERT INTO energy_transactions (user_id, type, amount, description, source_id)
+           VALUES ($1, 'earn', $2, $3, $4)`,
+          [userId, earned, `连续打卡${streakDays}天奖励`, sourceId],
+        );
+        await client.query(
+          `UPDATE energy_accounts
+           SET balance = balance + $2, total_earned = total_earned + $2,
+               daily_earned = daily_earned + $2,
+               version = version + 1, updated_at = NOW()
+           WHERE user_id = $1`,
+          [userId, earned],
+        );
+      }
     } else {
       await client.query(
         `INSERT INTO energy_transactions (user_id, type, amount, description, source_id)
@@ -304,7 +392,7 @@ export async function checkIn(userId: string): Promise<{
       );
     }
 
-    const account = (await getEnergyAccount(userId))!;
+    const account = await getEnergyAccountWithClient(client, userId);
     return { isNewDay: true, streakBonus: bonus, account };
   });
 }

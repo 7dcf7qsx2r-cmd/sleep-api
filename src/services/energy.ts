@@ -35,17 +35,18 @@ export async function ensureEnergyAccount(userId: string): Promise<EnergyAccount
     max_streak_days: number;
     daily_earned: number;
     daily_cap: number;
+    daily_earned_date: string | null;
     last_check_in: string | null;
     version: number;
     updated_at: Date;
   }>(
     `INSERT INTO energy_accounts (
       user_id, balance, total_earned, total_spent, streak_days, max_streak_days,
-      daily_earned, daily_cap, version
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1)
+      daily_earned, daily_cap, daily_earned_date, version
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_DATE, 1)
     ON CONFLICT (user_id) DO NOTHING
     RETURNING balance, total_earned, total_spent, streak_days, max_streak_days,
-              daily_earned, daily_cap, last_check_in, version, updated_at`,
+              daily_earned, daily_cap, daily_earned_date, last_check_in, version, updated_at`,
     [
       userId,
       DEFAULT_ACCOUNT.balance,
@@ -73,12 +74,13 @@ export async function getEnergyAccount(userId: string): Promise<EnergyAccountDto
     max_streak_days: number;
     daily_earned: number;
     daily_cap: number;
+    daily_earned_date: string | null;
     last_check_in: string | null;
     version: number;
     updated_at: Date;
   }>(
     `SELECT balance, total_earned, total_spent, streak_days, max_streak_days,
-            daily_earned, daily_cap, last_check_in, version, updated_at
+            daily_earned, daily_cap, daily_earned_date, last_check_in, version, updated_at
      FROM energy_accounts WHERE user_id = $1`,
     [userId],
   );
@@ -95,6 +97,7 @@ function mapRow(r: {
   max_streak_days: number;
   daily_earned: number;
   daily_cap: number;
+  daily_earned_date?: string | null;
   last_check_in: string | null;
   version: number;
   updated_at: Date;

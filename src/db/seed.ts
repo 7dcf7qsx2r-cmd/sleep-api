@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { closeDb, query } from './client.js';
 import { ensureEnergyAccount } from '../services/energy.js';
+import { SHOP_PRODUCTS } from '../config/shopProducts.js';
 
 const PREFAB_USERS = [
   { username: 'demo', password: 'demo123', nickname: '演示用户' },
@@ -52,6 +53,37 @@ async function seedAdminUser(roleId: string) {
   console.log(`Created admin: ${DEFAULT_ADMIN.username} / ${DEFAULT_ADMIN.password}`);
 }
 
+async function seedShopProducts() {
+  for (const [index, product] of SHOP_PRODUCTS.entries()) {
+    await query(
+      `INSERT INTO shop_products (
+        id, icon, name, summary, description, ai_reason, shop_name, image_slides,
+        details, energy_price, original_energy_price, rmb_price, original_rmb_price,
+        status, sort_order, published_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10, $11, $12, $13, 'published', $14, NOW())
+      ON CONFLICT (id) DO NOTHING`,
+      [
+        product.id,
+        product.icon,
+        product.name,
+        product.summary ?? '',
+        product.description,
+        product.aiReason ?? '',
+        product.shopName ?? '小眠官方',
+        JSON.stringify(product.imageSlides ?? []),
+        JSON.stringify(product.details ?? []),
+        product.energyPrice,
+        product.originalEnergyPrice,
+        product.rmbPrice,
+        product.originalRmbPrice,
+        index + 1,
+      ],
+    );
+  }
+  console.log(`Seeded shop products: ${SHOP_PRODUCTS.length}`);
+}
+
 async function main() {
   for (const u of PREFAB_USERS) {
     const hash = await bcrypt.hash(u.password, 10);
@@ -82,6 +114,7 @@ async function main() {
 
   const roleId = await ensureAdminRole();
   await seedAdminUser(roleId);
+  await seedShopProducts();
 
   await closeDb();
 }

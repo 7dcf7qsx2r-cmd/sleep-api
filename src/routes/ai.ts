@@ -230,7 +230,7 @@ aiRoutes.post(
       ],
       temperature: body.temperature ?? 0.85,
       maxTokens: body.maxTokens ?? 500,
-      timeoutMs: 15_000,
+      timeoutMs: 25_000,
       fallback: body.fallback,
     });
 
@@ -357,18 +357,18 @@ aiRoutes.post(
   ),
   async (c) => {
     const body = c.req.valid('json');
-    const bytes = await synthesizeSiliconFlowSpeech(body.input, {
+    const synth = await synthesizeSiliconFlowSpeech(body.input, {
       speed: body.speed,
       voice: body.voice,
       gain: body.gain,
     });
-    if (!bytes?.byteLength) {
+    if (!synth.bytes?.byteLength) {
       return c.json({
         error: 'tts_failed',
-        message: '语音合成不可用，请配置 SILICONFLOW_API_KEY',
+        message: synth.reason ?? '语音合成不可用，请检查 SILICONFLOW_API_KEY',
       }, 503);
     }
-    return new Response(bytes, {
+    return new Response(synth.bytes, {
       headers: {
         'Content-Type': 'audio/mpeg',
         'Cache-Control': 'private, max-age=3600',
@@ -401,7 +401,12 @@ aiRoutes.post(
 );
 
 aiRoutes.post('/stt/transcribe', async (c) => {
-  const form = await c.req.formData();
+  let form: FormData;
+  try {
+    form = await c.req.formData();
+  } catch {
+    return c.json({ error: 'no_file', message: '请上传音频文件' }, 400);
+  }
   const file = form.get('file');
   if (!file || typeof file === 'string') {
     return c.json({ error: 'no_file', message: '请上传音频文件' }, 400);

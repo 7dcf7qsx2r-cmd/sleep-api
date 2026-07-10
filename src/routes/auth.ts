@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
-import { createGuestSession, loginOrRegisterByPhone, loginOrRegisterByWeChat, loginWithPassword, getUserAccountProfile } from '../services/auth.js';
+import { createGuestSession, loginOrRegisterByPhone, loginOrRegisterByWeChat, loginWithPassword, getUserAccountProfile, UserBannedError } from '../services/auth.js';
 import { copyBlobsFromGuestToUser } from '../services/dataBlob.js';
 import { ensureEnergyAccount } from '../services/energy.js';
 import { verifyToken } from '../lib/jwt.js';
@@ -50,7 +50,15 @@ authRoutes.post(
   ),
   async (c) => {
     const { username, password } = c.req.valid('json');
-    const result = await loginWithPassword(username, password);
+    let result;
+    try {
+      result = await loginWithPassword(username, password);
+    } catch (err) {
+      if (err instanceof UserBannedError) {
+        return c.json({ error: 'user_banned', message: '账号已被封禁，请联系客服' }, 403);
+      }
+      throw err;
+    }
     if (!result) {
       return c.json({ error: 'invalid_credentials', message: '用户名或密码错误' }, 401);
     }
@@ -70,7 +78,7 @@ authRoutes.post(
   zValidator(
     'json',
     z.object({
-      phone: z.string().min(11).max(20),
+      phone: z.string().min(1).max(20),
     }),
   ),
   async (c) => {
@@ -99,7 +107,7 @@ authRoutes.post(
   zValidator(
     'json',
     z.object({
-      phone: z.string().min(11).max(20),
+      phone: z.string().min(1).max(20),
       code: z.string().regex(/^\d{6}$/),
     }),
   ),
@@ -115,7 +123,16 @@ authRoutes.post(
       return c.json({ error: 'invalid_code', message: '验证码错误或已过期' }, 401);
     }
 
-    const result = await loginOrRegisterByPhone(phone);
+    let result;
+    try {
+      result = await loginOrRegisterByPhone(phone);
+    } catch (err) {
+      if (err instanceof UserBannedError) {
+        return c.json({ error: 'user_banned', message: '账号已被封禁，请联系客服' }, 403);
+      }
+      throw err;
+    }
+    await ensureEnergyAccount(result.userId);
     return c.json({
       token: result.token,
       userId: result.userId,
@@ -163,6 +180,9 @@ authRoutes.post(
         expiresIn: process.env.JWT_EXPIRES_IN ?? '30d',
       });
     } catch (err) {
+      if (err instanceof UserBannedError) {
+        return c.json({ error: 'user_banned', message: '账号已被封禁，请联系客服' }, 403);
+      }
       console.error('[auth/wechat/login]', err);
       return c.json({ error: 'wechat_login_failed', message: '微信登录失败，请重试' }, 401);
     }

@@ -64,20 +64,28 @@ const MIGRATION_STATEMENTS = [
   max_streak_days INT NOT NULL DEFAULT 0,
   daily_earned INT NOT NULL DEFAULT 0,
   daily_cap INT NOT NULL DEFAULT 200,
+  daily_earned_date DATE NOT NULL DEFAULT CURRENT_DATE,
   last_check_in DATE,
   version INT NOT NULL DEFAULT 1,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )`,
+  `ALTER TABLE energy_accounts
+   ADD COLUMN IF NOT EXISTS daily_earned_date DATE NOT NULL DEFAULT CURRENT_DATE`,
   `CREATE TABLE IF NOT EXISTS energy_transactions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   type TEXT NOT NULL,
   amount INT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
-  source_id TEXT UNIQUE,
+  source_id TEXT,
   related_user_id UUID,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )`,
+  `ALTER TABLE energy_transactions
+   DROP CONSTRAINT IF EXISTS energy_transactions_source_id_key`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_energy_transactions_user_source
+   ON energy_transactions (user_id, source_id)
+   WHERE source_id IS NOT NULL`,
   `CREATE TABLE IF NOT EXISTS energy_task_daily (
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   task_id TEXT NOT NULL,
@@ -97,6 +105,123 @@ const MIGRATION_STATEMENTS = [
 )`,
   `CREATE INDEX IF NOT EXISTS idx_shop_orders_user
   ON shop_orders (user_id, created_at DESC)`,
+  `ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS quantity INT NOT NULL DEFAULT 1`,
+  `ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS product_snapshot_json JSONB NOT NULL DEFAULT '{}'`,
+  `ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+  `CREATE TABLE IF NOT EXISTS shop_order_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    order_id UUID NOT NULL REFERENCES shop_orders(id) ON DELETE CASCADE,
+    event_type TEXT NOT NULL,
+    before_status TEXT,
+    after_status TEXT,
+    note TEXT,
+    actor_type TEXT NOT NULL DEFAULT 'system' CHECK (actor_type IN ('system', 'admin', 'user')),
+    actor_id TEXT,
+    metadata_json JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_shop_order_events_order_created
+   ON shop_order_events (order_id, created_at ASC)`,
+
+  `CREATE TABLE IF NOT EXISTS shop_products (
+    id TEXT PRIMARY KEY,
+    icon TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    ai_reason TEXT NOT NULL DEFAULT '',
+    shop_name TEXT NOT NULL DEFAULT '小眠官方',
+    image_slides JSONB NOT NULL DEFAULT '[]',
+    details JSONB NOT NULL DEFAULT '[]',
+    energy_price INT NOT NULL DEFAULT 0,
+    original_energy_price INT NOT NULL DEFAULT 0,
+    rmb_price NUMERIC(10,2) NOT NULL DEFAULT 0,
+    original_rmb_price NUMERIC(10,2) NOT NULL DEFAULT 0,
+    stock INT,
+    status TEXT NOT NULL DEFAULT 'published' CHECK (status IN ('draft', 'published', 'archived')),
+    sort_order INT NOT NULL DEFAULT 0,
+    published_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_shop_products_status_sort
+   ON shop_products (status, sort_order ASC, created_at DESC)`,
+
+  `CREATE TABLE IF NOT EXISTS experts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    avatar_url TEXT,
+    bio TEXT NOT NULL DEFAULT '',
+    tags JSONB NOT NULL DEFAULT '[]',
+    service_methods JSONB NOT NULL DEFAULT '[]',
+    price_rmb NUMERIC(10,2) NOT NULL DEFAULT 0,
+    sort_order INT NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending_review' CHECK (status IN ('pending_review', 'published', 'archived')),
+    review_note TEXT,
+    published_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_experts_status_sort
+   ON experts (status, sort_order ASC, created_at DESC)`,
+  `CREATE TABLE IF NOT EXISTS expert_credentials (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    expert_id UUID NOT NULL REFERENCES experts(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    image_url TEXT,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+    review_note TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_expert_credentials_expert
+   ON expert_credentials (expert_id, created_at DESC)`,
+  `CREATE TABLE IF NOT EXISTS expert_schedules (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    expert_id UUID NOT NULL REFERENCES experts(id) ON DELETE CASCADE,
+    weekday INT NOT NULL CHECK (weekday BETWEEN 0 AND 6),
+    start_time TEXT NOT NULL,
+    end_time TEXT NOT NULL,
+    is_available BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_expert_schedules_expert
+   ON expert_schedules (expert_id, weekday, start_time)`,
+
+  `CREATE TABLE IF NOT EXISTS content_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    content_key TEXT NOT NULL UNIQUE,
+    placement TEXT NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL DEFAULT '',
+    image_url TEXT,
+    action_url TEXT,
+    status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'archived')),
+    sort_order INT NOT NULL DEFAULT 0,
+    metadata_json JSONB NOT NULL DEFAULT '{}',
+    published_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_content_items_placement_status_sort
+   ON content_items (placement, status, sort_order ASC, created_at DESC)`,
+  `CREATE TABLE IF NOT EXISTS growth_campaigns (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    channel TEXT NOT NULL DEFAULT 'in_app',
+    status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'active', 'paused', 'ended')),
+    goal TEXT NOT NULL DEFAULT '',
+    budget_rmb NUMERIC(10,2) NOT NULL DEFAULT 0,
+    starts_at TIMESTAMPTZ,
+    ends_at TIMESTAMPTZ,
+    config_json JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_growth_campaigns_status_created
+   ON growth_campaigns (status, created_at DESC)`,
 
   // === P3: Social + Push ===
   `CREATE TABLE IF NOT EXISTS friendships (
@@ -158,6 +283,73 @@ const MIGRATION_STATEMENTS = [
     post_id UUID NOT NULL REFERENCES feed_posts(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (user_id, post_id)
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS night_school_checkins (
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    main_concern TEXT NOT NULL,
+    episode_index INT NOT NULL,
+    night_date DATE NOT NULL,
+    online_until TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, main_concern, night_date)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_night_school_checkins_cohort
+   ON night_school_checkins (main_concern, night_date, online_until DESC)`,
+
+  `CREATE TABLE IF NOT EXISTS night_school_wall_notes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    main_concern TEXT NOT NULL,
+    episode_index INT NOT NULL,
+    night_date DATE NOT NULL,
+    text TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (user_id, main_concern, night_date)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_night_school_wall_notes_cohort
+   ON night_school_wall_notes (main_concern, night_date, created_at DESC)`,
+
+  `CREATE TABLE IF NOT EXISTS sleep_squads (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    sleep_type TEXT NOT NULL,
+    main_concern TEXT,
+    week_key DATE NOT NULL,
+    target_nights INT NOT NULL DEFAULT 10,
+    pool_reward_se INT NOT NULL DEFAULT 80,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (sleep_type, main_concern, week_key)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_sleep_squads_lookup
+   ON sleep_squads (sleep_type, main_concern, week_key)`,
+
+  `CREATE TABLE IF NOT EXISTS sleep_squad_members (
+    squad_id UUID NOT NULL REFERENCES sleep_squads(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    left_at TIMESTAMPTZ,
+    PRIMARY KEY (squad_id, user_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_sleep_squad_members_user
+   ON sleep_squad_members (user_id, left_at, joined_at DESC)`,
+
+  `CREATE TABLE IF NOT EXISTS sleep_squad_checkins (
+    squad_id UUID NOT NULL REFERENCES sleep_squads(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    night_date DATE NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (squad_id, user_id, night_date)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_sleep_squad_checkins_squad
+   ON sleep_squad_checkins (squad_id, night_date)`,
+
+  `CREATE TABLE IF NOT EXISTS sleep_squad_rewards (
+    squad_id UUID NOT NULL REFERENCES sleep_squads(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    week_key DATE NOT NULL,
+    claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (squad_id, user_id, week_key)
   )`,
 
   `CREATE TABLE IF NOT EXISTS push_devices (

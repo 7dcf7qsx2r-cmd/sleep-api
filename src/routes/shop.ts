@@ -11,9 +11,9 @@ import {
 
 export const shopRoutes = new Hono<{ Variables: AuthVariables }>();
 
-shopRoutes.use('*', requireAuth);
+shopRoutes.get('/products', async (c) => c.json({ products: await listProducts() }));
 
-shopRoutes.get('/products', (c) => c.json({ products: listProducts() }));
+shopRoutes.use('*', requireAuth);
 
 shopRoutes.get('/orders', async (c) => {
   const auth = c.get('auth');
@@ -28,16 +28,17 @@ shopRoutes.post(
     'json',
     z.object({
       productId: z.string().max(32),
+      quantity: z.number().int().positive().max(99).optional(),
       paymentMethod: z.enum(['energy', 'sandbox_wechat']),
     }),
   ),
   async (c) => {
     const auth = c.get('auth');
     if (auth.type !== 'user') return c.json({ error: 'guest_forbidden' }, 403);
-    const { productId, paymentMethod } = c.req.valid('json');
+    const { productId, paymentMethod, quantity } = c.req.valid('json');
 
     if (paymentMethod === 'energy') {
-      const result = await purchaseWithEnergy(auth.sub, productId);
+      const result = await purchaseWithEnergy(auth.sub, productId, quantity ?? 1);
       if (!result.success) {
         return c.json(result, result.error === 'insufficient_balance' ? 400 : 404);
       }

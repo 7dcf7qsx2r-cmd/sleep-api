@@ -5,6 +5,18 @@ import { signToken } from '../lib/jwt.js';
 import { maskPhone } from '../lib/phone.js';
 import { ensureEnergyAccount } from './energy.js';
 
+export class UserBannedError extends Error {
+  constructor() {
+    super('user_banned');
+  }
+}
+
+function assertUserActive(user: { status?: string | null }) {
+  if (user.status && user.status !== 'active') {
+    throw new UserBannedError();
+  }
+}
+
 export async function createGuestSession(deviceId?: string) {
   const row = await query<{ id: string }>(
     `INSERT INTO guest_sessions (device_id) VALUES ($1) RETURNING id`,
@@ -16,13 +28,14 @@ export async function createGuestSession(deviceId?: string) {
 }
 
 export async function loginWithPassword(username: string, password: string) {
-  const row = await query<{ id: string; password_hash: string; username: string }>(
-    `SELECT id, password_hash, username FROM users
+  const row = await query<{ id: string; password_hash: string; username: string; status: string }>(
+    `SELECT id, password_hash, username, status FROM users
      WHERE username = $1 AND deleted_at IS NULL AND password_hash IS NOT NULL`,
     [username],
   );
   const user = row.rows[0];
   if (!user) return null;
+  assertUserActive(user);
 
   const ok = await bcrypt.compare(password, user.password_hash);
   if (!ok) return null;
@@ -32,13 +45,14 @@ export async function loginWithPassword(username: string, password: string) {
 }
 
 export async function loginOrRegisterByPhone(phone: string) {
-  const existing = await query<{ id: string; username: string | null; phone: string }>(
-    `SELECT id, username, phone FROM users WHERE phone = $1 AND deleted_at IS NULL`,
+  const existing = await query<{ id: string; username: string | null; phone: string; status: string }>(
+    `SELECT id, username, phone, status FROM users WHERE phone = $1 AND deleted_at IS NULL`,
     [phone],
   );
 
   if (existing.rows[0]) {
     const user = existing.rows[0];
+    assertUserActive(user);
     const token = await signToken({ sub: user.id, type: 'user' });
     return {
       userId: user.id,
@@ -88,8 +102,8 @@ export async function loginOrRegisterByWeChat(params: {
 }) {
   const { openid, unionid, nickname, avatarUrl } = params;
 
-  const existing = await query<{ id: string; username: string | null }>(
-    `SELECT id, username FROM users
+  const existing = await query<{ id: string; username: string | null; status: string }>(
+    `SELECT id, username, status FROM users
      WHERE deleted_at IS NULL
        AND (
          ($1::text IS NOT NULL AND wechat_unionid = $1)
@@ -101,6 +115,7 @@ export async function loginOrRegisterByWeChat(params: {
 
   if (existing.rows[0]) {
     const user = existing.rows[0];
+    assertUserActive(user);
     await upsertWeChatProfile(user.id, nickname, avatarUrl);
     const profile = await getUserAccountProfile(user.id);
     const token = await signToken({ sub: user.id, type: 'user' });

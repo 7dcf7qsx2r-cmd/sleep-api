@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { requireAuth, type AuthVariables } from '../middleware/auth.js';
+import { getTaskDef } from '../config/energyTasks.js';
 import { ensureEnergyAccount } from '../services/energy.js';
 import {
   checkIn,
@@ -43,6 +44,26 @@ energyRoutes.get('/tasks', async (c) => {
   const tasks = await getTaskProgress(userId);
   return c.json({ tasks });
 });
+
+energyRoutes.post(
+  '/tasks/validate',
+  zValidator(
+    'json',
+    z.object({
+      taskId: z.string().min(1).max(64),
+      evidenceSummary: z.string().max(2000).optional(),
+    }),
+  ),
+  async (c) => {
+    const userId = requireUser(c);
+    if (!userId) return c.json({ error: 'guest_forbidden' }, 403);
+    const { taskId } = c.req.valid('json');
+    if (!getTaskDef(taskId) && taskId !== 'evidence_chain') {
+      return c.json({ approved: false, reason: 'unknown_task' });
+    }
+    return c.json({ approved: true });
+  },
+);
 
 energyRoutes.post('/tasks/:taskId/complete', async (c) => {
   const userId = requireUser(c);

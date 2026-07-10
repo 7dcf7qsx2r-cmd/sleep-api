@@ -20,6 +20,14 @@ import {
   createPost,
   listFeed,
   toggleLike,
+  getNightSchoolCohort,
+  listNightSchoolWallNotes,
+  upsertNightSchoolCheckIn,
+  claimSleepSquadReward,
+  getCurrentSleepSquad,
+  joinSleepSquad,
+  leaveCurrentSleepSquad,
+  recordSleepSquadCheckIn,
 } from '../services/social.js';
 import { completeTask } from '../services/energyLedger.js';
 import { enqueueJob } from '../services/jobQueue.js';
@@ -82,6 +90,118 @@ socialRoutes.get('/friends/pending', async (c) => {
   if (auth.type !== 'user') return c.json({ error: 'guest_not_allowed' }, 403);
   const rows = await listPendingRequests(auth.sub);
   return c.json({ requests: rows });
+});
+
+/* ================================================================
+   Night School
+   ================================================================ */
+
+socialRoutes.use('/night-school/*', requireAuth);
+
+socialRoutes.get('/night-school/cohort', async (c) => {
+  const auth = c.get('auth');
+  if (auth.type !== 'user') return c.json({ error: 'guest_not_allowed' }, 403);
+  const concern = c.req.query('concern')?.trim();
+  if (!concern) return c.json({ error: 'concern_required' }, 400);
+  const cohort = await getNightSchoolCohort(auth.sub, concern);
+  return c.json({ cohort });
+});
+
+socialRoutes.post(
+  '/night-school/check-in',
+  zValidator(
+    'json',
+    z.object({
+      mainConcern: z.string().min(1).max(64),
+      episodeIndex: z.number().int().min(0).max(99),
+      nightDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      wallNote: z.string().max(60).optional(),
+    }),
+  ),
+  async (c) => {
+    const auth = c.get('auth');
+    if (auth.type !== 'user') return c.json({ error: 'guest_not_allowed' }, 403);
+    const body = c.req.valid('json');
+    await upsertNightSchoolCheckIn({
+      userId: auth.sub,
+      mainConcern: body.mainConcern,
+      episodeIndex: body.episodeIndex,
+      nightDate: body.nightDate,
+      wallNote: body.wallNote,
+    });
+    return c.json({ ok: true });
+  },
+);
+
+socialRoutes.get('/night-school/wall', async (c) => {
+  const auth = c.get('auth');
+  if (auth.type !== 'user') return c.json({ error: 'guest_not_allowed' }, 403);
+  const concern = c.req.query('concern')?.trim();
+  if (!concern) return c.json({ error: 'concern_required' }, 400);
+  const limit = Math.min(parseInt(c.req.query('limit') ?? '30', 10), 50);
+  const notes = await listNightSchoolWallNotes(concern, limit);
+  return c.json({ notes });
+});
+
+/* ================================================================
+   Sleep Squads
+   ================================================================ */
+
+socialRoutes.use('/squad/*', requireAuth);
+
+socialRoutes.get('/squad/current', async (c) => {
+  const auth = c.get('auth');
+  if (auth.type !== 'user') return c.json({ error: 'guest_not_allowed' }, 403);
+  const squad = await getCurrentSleepSquad(auth.sub);
+  return c.json({ squad });
+});
+
+socialRoutes.post(
+  '/squad/join',
+  zValidator(
+    'json',
+    z.object({
+      sleepType: z.string().min(1).max(64),
+      mainConcern: z.string().min(1).max(64).optional(),
+    }),
+  ),
+  async (c) => {
+    const auth = c.get('auth');
+    if (auth.type !== 'user') return c.json({ error: 'guest_not_allowed' }, 403);
+    const body = c.req.valid('json');
+    const squad = await joinSleepSquad({
+      userId: auth.sub,
+      sleepType: body.sleepType,
+      mainConcern: body.mainConcern,
+    });
+    return c.json({ squad });
+  },
+);
+
+socialRoutes.post('/squad/leave', async (c) => {
+  const auth = c.get('auth');
+  if (auth.type !== 'user') return c.json({ error: 'guest_not_allowed' }, 403);
+  await leaveCurrentSleepSquad(auth.sub);
+  return c.json({ ok: true });
+});
+
+socialRoutes.post(
+  '/squad/check-in',
+  zValidator('json', z.object({ nightDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) })),
+  async (c) => {
+    const auth = c.get('auth');
+    if (auth.type !== 'user') return c.json({ error: 'guest_not_allowed' }, 403);
+    const { nightDate } = c.req.valid('json');
+    const squad = await recordSleepSquadCheckIn(auth.sub, nightDate);
+    return c.json({ ok: Boolean(squad), squad });
+  },
+);
+
+socialRoutes.post('/squad/claim', async (c) => {
+  const auth = c.get('auth');
+  if (auth.type !== 'user') return c.json({ error: 'guest_not_allowed' }, 403);
+  const result = await claimSleepSquadReward(auth.sub);
+  return c.json(result, result.ok ? 200 : 400);
 });
 
 /* ================================================================
@@ -251,6 +371,11 @@ socialRoutes.post(
       type: body.type,
       contentJson: body.content,
     });
+    try {
+      await completeTask(auth.sub, 'post_feed');
+    } catch {
+      // ignore energy errors
+    }
     return c.json({ ok: true, post }, 201);
   },
 );
@@ -260,7 +385,7 @@ socialRoutes.get('/feed', async (c) => {
   if (auth.type !== 'user') return c.json({ error: 'guest_not_allowed' }, 403);
   const cursor = c.req.query('cursor');
   const limit = Math.min(parseInt(c.req.query('limit') ?? '20', 10), 50);
-  const posts = await listFeed(cursor, limit);
+  const posts = await listFeed(cursor, limit, auth.sub);
   return c.json({ posts, nextCursor: posts.length === limit ? posts[posts.length - 1]?.created_at : null });
 });
 
@@ -282,6 +407,11 @@ socialRoutes.post('/feed/:id/like', async (c) => {
       });
       // Also enqueue feed_notify for followers (placeholder)
       await enqueueJob('feed_notify', { postId, authorId: post.user_id, likerId: auth.sub });
+    }
+    try {
+      await completeTask(auth.sub, 'like_feed');
+    } catch {
+      // ignore energy errors
     }
   }
 
