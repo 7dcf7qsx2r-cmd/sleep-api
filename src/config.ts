@@ -42,9 +42,15 @@ export const config = {
     hourlyLimitPerIp: intEnv('SMS_HOURLY_LIMIT_PER_IP', 20),
     maxAttempts: intEnv('SMS_MAX_VERIFY_ATTEMPTS', 5),
   },
+  /** 微信开放平台 · 移动应用 OAuth */
   wechat: {
     appId: process.env.WECHAT_APP_ID ?? '',
     appSecret: process.env.WECHAT_APP_SECRET ?? '',
+  },
+  /** 微信小程序 · wx.login → jscode2session */
+  wechatMp: {
+    appId: process.env.WECHAT_MP_APP_ID ?? '',
+    appSecret: process.env.WECHAT_MP_APP_SECRET ?? '',
   },
   quota: {
     guestChat: intEnv('QUOTA_GUEST_CHAT', 15),

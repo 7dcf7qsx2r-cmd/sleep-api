@@ -46,6 +46,8 @@ jobs:
           RADAR_PUSH_SECRET: ${{ secrets.RADAR_PUSH_SECRET }}
           WECHAT_APP_ID: ${{ secrets.WECHAT_APP_ID }}
           WECHAT_APP_SECRET: ${{ secrets.WECHAT_APP_SECRET }}
+          WECHAT_MP_APP_ID: ${{ secrets.WECHAT_MP_APP_ID }}
+          WECHAT_MP_APP_SECRET: ${{ secrets.WECHAT_MP_APP_SECRET }}
           TENCENT_SMS_SECRET_ID: ${{ secrets.TENCENT_SMS_SECRET_ID }}
           TENCENT_SMS_SECRET_KEY: ${{ secrets.TENCENT_SMS_SECRET_KEY }}
           TENCENT_SMS_SDK_APP_ID: ${{ secrets.TENCENT_SMS_SDK_APP_ID }}

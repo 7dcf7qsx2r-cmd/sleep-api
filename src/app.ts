@@ -14,6 +14,7 @@ import { radarRoutes } from './routes/radar.js';
 import { adminRoutes } from './routes/admin/index.js';
 import { expertRoutes } from './routes/experts.js';
 import { contentRoutes } from './routes/content.js';
+import { reportRoutes } from './routes/report.js';
 
 export function createApp() {
   const app = new Hono();
@@ -53,6 +54,7 @@ export function createApp() {
   app.route('/api/radar', radarRoutes);
   app.route('/experts', expertRoutes);
   app.route('/content', contentRoutes);
+  app.route('/report', reportRoutes);
   app.route('/admin', adminRoutes);
 
   app.notFound((c) => c.json({ error: 'not_found' }, 404));

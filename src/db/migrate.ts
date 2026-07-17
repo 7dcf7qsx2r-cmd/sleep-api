@@ -322,6 +322,42 @@ const MIGRATION_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_night_school_wall_notes_cohort
    ON night_school_wall_notes (main_concern, night_date, created_at DESC)`,
 
+  `CREATE TABLE IF NOT EXISTS night_lab_experiments (
+    id TEXT PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    night_date DATE NOT NULL,
+    main_concern TEXT NOT NULL,
+    experiment_kind TEXT NOT NULL,
+    hypothesis_id TEXT NOT NULL,
+    data_source TEXT NOT NULL,
+    confidence TEXT NOT NULL,
+    verification_metric TEXT,
+    result_bucket TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    committed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    revealed_at TIMESTAMPTZ,
+    UNIQUE (user_id, night_date)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_night_lab_experiments_group
+   ON night_lab_experiments (night_date, main_concern, experiment_kind, hypothesis_id, committed_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_night_lab_experiments_result
+   ON night_lab_experiments (night_date, experiment_kind, hypothesis_id, result_bucket)`,
+
+  `CREATE TABLE IF NOT EXISTS night_lab_group_notes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    experiment_id TEXT NOT NULL REFERENCES night_lab_experiments(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    night_date DATE NOT NULL,
+    main_concern TEXT NOT NULL,
+    experiment_kind TEXT NOT NULL,
+    hypothesis_id TEXT NOT NULL,
+    text TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (user_id, night_date, experiment_kind, hypothesis_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_night_lab_group_notes_group
+   ON night_lab_group_notes (night_date, main_concern, experiment_kind, hypothesis_id, created_at DESC)`,
+
   `CREATE TABLE IF NOT EXISTS sleep_squads (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     sleep_type TEXT NOT NULL,

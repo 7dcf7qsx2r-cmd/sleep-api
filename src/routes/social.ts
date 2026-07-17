@@ -21,7 +21,11 @@ import {
   listFeed,
   toggleLike,
   getNightSchoolCohort,
+  commitNightLabExperiment,
+  getNightLabGroup,
+  getNightLabGroupResult,
   listNightSchoolWallNotes,
+  revealNightLabExperiment,
   upsertNightSchoolCheckIn,
   claimSleepSquadReward,
   getCurrentSleepSquad,
@@ -142,6 +146,114 @@ socialRoutes.get('/night-school/wall', async (c) => {
   const notes = await listNightSchoolWallNotes(concern, limit);
   return c.json({ notes });
 });
+
+/* ================================================================
+   Night Lab
+   ================================================================ */
+
+socialRoutes.use('/night-lab/*', requireAuth);
+
+const nightLabBaseSchema = z.object({
+  experimentId: z.string().min(1).max(80),
+  nightDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  mainConcern: z.string().min(1).max(64),
+  experimentKind: z.string().min(1).max(64),
+  hypothesisId: z.string().min(1).max(64),
+});
+
+socialRoutes.post(
+  '/night-lab/commit',
+  zValidator(
+    'json',
+    nightLabBaseSchema.extend({
+      dataSource: z.enum(['device', 'diary', 'seed']),
+      confidence: z.enum(['high', 'medium', 'low']),
+      verificationMetric: z.string().max(64).optional(),
+      noteText: z.string().max(60).optional(),
+    }),
+  ),
+  async (c) => {
+    const auth = c.get('auth');
+    if (auth.type !== 'user') return c.json({ error: 'guest_not_allowed' }, 403);
+    const body = c.req.valid('json');
+    await commitNightLabExperiment({
+      id: body.experimentId,
+      userId: auth.sub,
+      nightDate: body.nightDate,
+      mainConcern: body.mainConcern,
+      experimentKind: body.experimentKind,
+      hypothesisId: body.hypothesisId,
+      dataSource: body.dataSource,
+      confidence: body.confidence,
+      verificationMetric: body.verificationMetric,
+      noteText: body.noteText,
+    });
+    return c.json({ ok: true });
+  },
+);
+
+socialRoutes.post(
+  '/night-lab/reveal',
+  zValidator(
+    'json',
+    z.object({
+      experimentId: z.string().min(1).max(80),
+      resultBucket: z.enum(['hit', 'partial', 'miss', 'insufficient_data']),
+    }),
+  ),
+  async (c) => {
+    const auth = c.get('auth');
+    if (auth.type !== 'user') return c.json({ error: 'guest_not_allowed' }, 403);
+    const body = c.req.valid('json');
+    const experiment = await revealNightLabExperiment({
+      userId: auth.sub,
+      experimentId: body.experimentId,
+      resultBucket: body.resultBucket,
+    });
+    if (!experiment) return c.json({ error: 'not_found' }, 404);
+    return c.json({ ok: true, experiment });
+  },
+);
+
+socialRoutes.get(
+  '/night-lab/group',
+  zValidator(
+    'query',
+    z.object({
+      mainConcern: z.string().min(1).max(64),
+      experimentKind: z.string().min(1).max(64),
+      hypothesisId: z.string().min(1).max(64),
+      nightDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      limit: z.coerce.number().int().min(1).max(50).optional(),
+    }),
+  ),
+  async (c) => {
+    const auth = c.get('auth');
+    if (auth.type !== 'user') return c.json({ error: 'guest_not_allowed' }, 403);
+    const q = c.req.valid('query');
+    const group = await getNightLabGroup(q);
+    return c.json({ group });
+  },
+);
+
+socialRoutes.get(
+  '/night-lab/group-result',
+  zValidator(
+    'query',
+    z.object({
+      experimentKind: z.string().min(1).max(64),
+      hypothesisId: z.string().min(1).max(64),
+      nightDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    }),
+  ),
+  async (c) => {
+    const auth = c.get('auth');
+    if (auth.type !== 'user') return c.json({ error: 'guest_not_allowed' }, 403);
+    const q = c.req.valid('query');
+    const result = await getNightLabGroupResult(q);
+    return c.json({ result });
+  },
+);
 
 /* ================================================================
    Sleep Squads

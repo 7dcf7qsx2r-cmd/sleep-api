@@ -10,7 +10,7 @@ healthRoutes.get('/', (c) =>
     status: 'running',
     endpoints: {
       health: '/health',
-      auth: '/auth/guest · /auth/login · /auth/sms/send · /auth/sms/login · /auth/wechat/login',
+      auth: '/auth/guest · /auth/login · /auth/sms/send · /auth/sms/login · /auth/wechat/login · /auth/wechat/mp/login',
       sync: '/sync/bootstrap · /sync/:domain',
       ai: '/ai/chat · /ai/dream/interpret',
       energy: '/energy/account · /energy/spend · /energy/tasks',
@@ -40,5 +40,6 @@ healthRoutes.get('/health', async (c) => {
       config.sms.secretId && config.sms.sdkAppId && config.sms.signName && config.sms.templateId,
     ),
     wechatConfigured: Boolean(config.wechat.appId && config.wechat.appSecret),
+    wechatMpConfigured: Boolean(config.wechatMp.appId && config.wechatMp.appSecret),
   });
 });

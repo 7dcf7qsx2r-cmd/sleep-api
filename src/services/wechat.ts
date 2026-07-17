@@ -20,6 +20,46 @@ export function isWeChatConfigured(): boolean {
   return Boolean(config.wechat.appId && config.wechat.appSecret);
 }
 
+export function isWeChatMpConfigured(): boolean {
+  return Boolean(config.wechatMp.appId && config.wechatMp.appSecret);
+}
+
+export interface WeChatMpSessionResponse {
+  openid?: string;
+  session_key?: string;
+  unionid?: string;
+  errcode?: number;
+  errmsg?: string;
+}
+
+/** 小程序 wx.login code → openid / unionid（jscode2session） */
+export async function exchangeMiniProgramCode(code: string): Promise<{
+  openid: string;
+  unionid?: string;
+}> {
+  const { appId, appSecret } = config.wechatMp;
+  if (!appId || !appSecret) {
+    throw new Error('wechat_mp_not_configured');
+  }
+
+  const url = new URL('https://api.weixin.qq.com/sns/jscode2session');
+  url.searchParams.set('appid', appId);
+  url.searchParams.set('secret', appSecret);
+  url.searchParams.set('js_code', code);
+  url.searchParams.set('grant_type', 'authorization_code');
+
+  const res = await fetch(url.toString());
+  const data = (await res.json()) as WeChatMpSessionResponse;
+  if (data.errcode || !data.openid) {
+    throw new Error(data.errmsg ?? 'wechat_mp_session_failed');
+  }
+
+  return {
+    openid: data.openid,
+    unionid: data.unionid,
+  };
+}
+
 export async function exchangeWeChatCode(code: string): Promise<{
   openid: string;
   unionid?: string;

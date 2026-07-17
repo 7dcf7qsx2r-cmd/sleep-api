@@ -11,6 +11,7 @@ export const SYNC_DOMAINS = [
   'bedtime_story',
   'chat_messages',
   'voice_prefs',
+  'sleep_nights',
 ] as const;
 
 export type SyncDomain = typeof SYNC_DOMAINS[number];

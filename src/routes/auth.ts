@@ -8,7 +8,13 @@ import { verifyToken } from '../lib/jwt.js';
 import { normalizePhone, maskPhone } from '../lib/phone.js';
 import { issueAndSendCode, SmsRateLimitError, verifyCode } from '../services/sms/codeStore.js';
 import { isSmsConfigured } from '../services/sms/tencentSms.js';
-import { exchangeWeChatCode, fetchWeChatUserInfo, isWeChatConfigured } from '../services/wechat.js';
+import {
+  exchangeMiniProgramCode,
+  exchangeWeChatCode,
+  fetchWeChatUserInfo,
+  isWeChatConfigured,
+  isWeChatMpConfigured,
+} from '../services/wechat.js';
 import { requireAuth, type AuthVariables } from '../middleware/auth.js';
 
 export const authRoutes = new Hono<{ Variables: AuthVariables }>();
@@ -185,6 +191,51 @@ authRoutes.post(
       }
       console.error('[auth/wechat/login]', err);
       return c.json({ error: 'wechat_login_failed', message: '微信登录失败，请重试' }, 401);
+    }
+  },
+);
+
+authRoutes.post(
+  '/wechat/mp/login',
+  zValidator(
+    'json',
+    z.object({
+      code: z.string().min(1).max(512),
+      nickname: z.string().max(64).optional(),
+      avatarUrl: z.string().url().max(512).optional(),
+    }),
+  ),
+  async (c) => {
+    if (!isWeChatMpConfigured()) {
+      return c.json({ error: 'wechat_mp_not_configured', message: '小程序登录未配置' }, 503);
+    }
+
+    const { code, nickname, avatarUrl } = c.req.valid('json');
+    try {
+      const session = await exchangeMiniProgramCode(code);
+      const result = await loginOrRegisterByWeChat({
+        openid: session.openid,
+        unionid: session.unionid,
+        nickname,
+        avatarUrl,
+      });
+      await ensureEnergyAccount(result.userId);
+      return c.json({
+        token: result.token,
+        userId: result.userId,
+        username: result.username,
+        nickname: result.nickname,
+        avatarUrl: result.avatarUrl,
+        isNewUser: result.isNewUser,
+        subjectType: 'user',
+        expiresIn: process.env.JWT_EXPIRES_IN ?? '30d',
+      });
+    } catch (err) {
+      if (err instanceof UserBannedError) {
+        return c.json({ error: 'user_banned', message: '账号已被封禁，请联系客服' }, 403);
+      }
+      console.error('[auth/wechat/mp/login]', err);
+      return c.json({ error: 'wechat_mp_login_failed', message: '小程序登录失败，请重试' }, 401);
     }
   },
 );

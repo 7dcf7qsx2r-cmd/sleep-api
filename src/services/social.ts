@@ -403,6 +403,168 @@ export async function listNightSchoolWallNotes(mainConcern: string, limit = 30) 
   }));
 }
 
+/* ================================================================
+   Night Lab
+   ================================================================ */
+
+export interface NightLabCommitInput {
+  id: string;
+  userId: string;
+  nightDate: string;
+  mainConcern: string;
+  experimentKind: string;
+  hypothesisId: string;
+  dataSource: string;
+  confidence: string;
+  verificationMetric?: string;
+  noteText?: string;
+}
+
+export async function commitNightLabExperiment(input: NightLabCommitInput) {
+  await query(
+    `INSERT INTO night_lab_experiments (
+       id, user_id, night_date, main_concern, experiment_kind, hypothesis_id,
+       data_source, confidence, verification_metric, committed_at
+     )
+     VALUES ($1, $2, $3::date, $4, $5, $6, $7, $8, $9, NOW())
+     ON CONFLICT (user_id, night_date)
+     DO UPDATE SET
+       id = EXCLUDED.id,
+       main_concern = EXCLUDED.main_concern,
+       experiment_kind = EXCLUDED.experiment_kind,
+       hypothesis_id = EXCLUDED.hypothesis_id,
+       data_source = EXCLUDED.data_source,
+       confidence = EXCLUDED.confidence,
+       verification_metric = EXCLUDED.verification_metric,
+       committed_at = NOW()`,
+    [
+      input.id,
+      input.userId,
+      input.nightDate,
+      input.mainConcern,
+      input.experimentKind,
+      input.hypothesisId,
+      input.dataSource,
+      input.confidence,
+      input.verificationMetric ?? null,
+    ],
+  );
+
+  const text = input.noteText?.trim().slice(0, 60);
+  if (text) {
+    await query(
+      `INSERT INTO night_lab_group_notes (
+         experiment_id, user_id, night_date, main_concern, experiment_kind, hypothesis_id, text
+       )
+       VALUES ($1, $2, $3::date, $4, $5, $6, $7)
+       ON CONFLICT (user_id, night_date, experiment_kind, hypothesis_id)
+       DO UPDATE SET text = EXCLUDED.text, created_at = NOW()`,
+      [
+        input.id,
+        input.userId,
+        input.nightDate,
+        input.mainConcern,
+        input.experimentKind,
+        input.hypothesisId,
+        text,
+      ],
+    );
+  }
+}
+
+export async function revealNightLabExperiment(input: {
+  userId: string;
+  experimentId: string;
+  resultBucket: string;
+}) {
+  const result = await query(
+    `UPDATE night_lab_experiments
+     SET result_bucket = $3, revealed_at = NOW()
+     WHERE id = $1 AND user_id = $2
+     RETURNING id, night_date::text, main_concern, experiment_kind, hypothesis_id, result_bucket`,
+    [input.experimentId, input.userId, input.resultBucket],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function getNightLabGroup(params: {
+  mainConcern: string;
+  experimentKind: string;
+  hypothesisId: string;
+  nightDate?: string;
+  limit?: number;
+}) {
+  const nightDate = params.nightDate ?? todayDate();
+  const count = await query<{ count: string }>(
+    `SELECT COUNT(*)::text AS count
+     FROM night_lab_experiments
+     WHERE night_date = $1::date
+       AND main_concern = $2
+       AND experiment_kind = $3
+       AND hypothesis_id = $4`,
+    [nightDate, params.mainConcern, params.experimentKind, params.hypothesisId],
+  );
+  const notes = await query<{
+    id: string;
+    user_id: string;
+    username: string | null;
+    nickname: string | null;
+    text: string;
+    created_at: Date;
+  }>(
+    `SELECT n.id, n.user_id, u.username, up.nickname, n.text, n.created_at
+     FROM night_lab_group_notes n
+     JOIN users u ON u.id = n.user_id
+     LEFT JOIN user_profiles up ON up.user_id = n.user_id
+     WHERE n.night_date = $1::date
+       AND n.main_concern = $2
+       AND n.experiment_kind = $3
+       AND n.hypothesis_id = $4
+     ORDER BY n.created_at DESC
+     LIMIT $5`,
+    [nightDate, params.mainConcern, params.experimentKind, params.hypothesisId, params.limit ?? 20],
+  );
+  return {
+    nightDate,
+    participants: Number(count.rows[0]?.count ?? 0),
+    notes: notes.rows.map((row) => ({
+      id: row.id,
+      userId: row.user_id,
+      alias: displayName({ id: row.user_id, username: row.username, nickname: row.nickname }),
+      text: row.text,
+      createdAt: row.created_at.toISOString(),
+    })),
+  };
+}
+
+export async function getNightLabGroupResult(params: {
+  experimentKind: string;
+  hypothesisId: string;
+  nightDate?: string;
+}) {
+  const nightDate = params.nightDate ?? todayDate();
+  const rows = await query<{ result_bucket: string | null; count: string }>(
+    `SELECT result_bucket, COUNT(*)::text AS count
+     FROM night_lab_experiments
+     WHERE night_date = $1::date
+       AND experiment_kind = $2
+       AND hypothesis_id = $3
+       AND result_bucket IS NOT NULL
+     GROUP BY result_bucket`,
+    [nightDate, params.experimentKind, params.hypothesisId],
+  );
+  const buckets = Object.fromEntries(rows.rows.map((row) => [row.result_bucket ?? 'unknown', Number(row.count)]));
+  const total = Object.values(buckets).reduce((sum, n) => sum + n, 0);
+  const improved = (buckets.hit ?? 0) + (buckets.partial ?? 0);
+  return {
+    nightDate,
+    total,
+    improved,
+    improvementRate: total > 0 ? improved / total : 0,
+    buckets,
+  };
+}
+
 
 /* ================================================================
    Sleep Squads

@@ -8,6 +8,9 @@ import { synthesizeSiliconFlowSpeech, fetchSiliconFlowSpeechStream } from '../li
 import { transcribeSiliconFlowAudio } from '../lib/siliconflowStt.js';
 import { createTtsStreamSession, consumeTtsStreamSession } from '../lib/ttsStreamSession.js';
 import { checkAndIncrement, getQuotaSnapshot } from '../services/quota.js';
+import { ownerFromAuth } from '../lib/owner.js';
+import { loadSleepNights } from '../services/sleepNights.js';
+import { buildHomeInsightFallback } from '../services/homeInsight.js';
 
 const XIAOMIAN_SYSTEM_PROMPT = `你是「小眠」，一个温柔的睡眠陪伴AI。你的存在意义是在深夜陪伴那些失眠、焦虑、疲惫的灵魂。
 
@@ -190,6 +193,25 @@ aiRoutes.get('/quota', async (c) => {
   const snapshot = await getQuotaSnapshot(auth.type, auth.sub);
   return c.json(snapshot);
 });
+
+aiRoutes.post(
+  '/home-insight',
+  zValidator(
+    'json',
+    z.object({
+      nickname: z.string().max(64).default('朋友'),
+      dreamCount: z.number().int().min(0).max(9999).default(0),
+    }),
+  ),
+  async (c) => {
+    const auth = c.get('auth');
+    const body = c.req.valid('json');
+    const owner = ownerFromAuth(auth);
+    const { nights } = await loadSleepNights(owner);
+    const insight = buildHomeInsightFallback(body.nickname, nights, body.dreamCount);
+    return c.json({ insight });
+  },
+);
 
 aiRoutes.post(
   '/chat',
