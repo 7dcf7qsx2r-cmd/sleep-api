@@ -35,6 +35,7 @@ import {
 } from '../services/social.js';
 import { completeTask } from '../services/energyLedger.js';
 import { enqueueJob } from '../services/jobQueue.js';
+import { saveUploadedImage } from '../lib/saveUploadedImage.js';
 
 export const socialRoutes = new Hono<{ Variables: AuthVariables }>();
 
@@ -462,6 +463,32 @@ socialRoutes.post('/bottles/:id/read', async (c) => {
 /* ================================================================
    Feed
    ================================================================ */
+
+socialRoutes.use('/uploads/*', requireAuth);
+
+socialRoutes.post('/uploads/images', async (c) => {
+  const auth = c.get('auth');
+  if (auth.type !== 'user') return c.json({ error: 'guest_not_allowed' }, 403);
+
+  let form: FormData;
+  try {
+    form = await c.req.formData();
+  } catch {
+    return c.json({ error: 'bad_form', message: '请上传图片文件' }, 400);
+  }
+
+  const file = form.get('file');
+  if (!file || typeof file === 'string') {
+    return c.json({ error: 'no_file', message: '请上传图片文件' }, 400);
+  }
+
+  const saved = await saveUploadedImage(file, 'social');
+  if ('error' in saved) {
+    return c.json({ error: saved.error, message: saved.message }, saved.status as 400);
+  }
+
+  return c.json(saved);
+});
 
 socialRoutes.use('/feed/*', requireAuth);
 
