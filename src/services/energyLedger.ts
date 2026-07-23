@@ -15,6 +15,20 @@ export interface EnergyTransactionDto {
   createdAt: string;
 }
 
+export type FeedTipErrorCode =
+  | 'invalid_amount'
+  | 'invalid_idempotency_key'
+  | 'post_not_found'
+  | 'cannot_tip_self'
+  | 'insufficient_energy'
+  | 'idempotency_conflict';
+
+export class FeedTipError extends Error {
+  constructor(public readonly code: FeedTipErrorCode) {
+    super(code);
+  }
+}
+
 function streakBonus(streakDays: number): number {
   if (streakDays < 4) return 0;
   if (streakDays < 8) return 10;
@@ -189,6 +203,145 @@ export async function spendEnergy(
 
     const account = await getEnergyAccountWithClient(client, userId);
     return { success: true, account };
+  });
+}
+
+/**
+ * Atomically records a feed tip and transfers energy between both accounts.
+ * The sender-scoped idempotency key covers the complete operation, including
+ * both ledger entries and account updates.
+ */
+export async function tipFeedPost(input: {
+  senderId: string;
+  postId: string;
+  amount: number;
+  idempotencyKey: string;
+}): Promise<{
+  tip: {
+    id: string;
+    post_id: string;
+    sender_id: string;
+    recipient_id: string;
+    amount: number;
+    idempotency_key: string;
+    created_at: Date;
+  };
+  balance: number;
+  duplicate: boolean;
+}> {
+  if (!Number.isSafeInteger(input.amount) || input.amount <= 0) {
+    throw new FeedTipError('invalid_amount');
+  }
+  if (!input.idempotencyKey.trim() || input.idempotencyKey.length > 128) {
+    throw new FeedTipError('invalid_idempotency_key');
+  }
+  await ensureEnergyAccount(input.senderId);
+
+  const post = await query<{ user_id: string }>(
+    `SELECT user_id FROM feed_posts WHERE id = $1`,
+    [input.postId],
+  );
+  const recipientId = post.rows[0]?.user_id;
+  if (!recipientId) throw new FeedTipError('post_not_found');
+  if (recipientId === input.senderId) throw new FeedTipError('cannot_tip_self');
+  await ensureEnergyAccount(recipientId);
+
+  return withClient(async (client) => {
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtext($1))`,
+      [`feed_tip:${input.senderId}:${input.idempotencyKey}`],
+    );
+
+    const existing = await client.query<{
+      id: string;
+      post_id: string;
+      sender_id: string;
+      recipient_id: string;
+      amount: number;
+      idempotency_key: string;
+      created_at: Date;
+    }>(
+      `SELECT id, post_id, sender_id, recipient_id, amount, idempotency_key, created_at
+       FROM feed_tips
+       WHERE sender_id = $1 AND idempotency_key = $2`,
+      [input.senderId, input.idempotencyKey],
+    );
+    if (existing.rows[0]) {
+      const tip = existing.rows[0];
+      if (tip.post_id !== input.postId || tip.amount !== input.amount) {
+        throw new FeedTipError('idempotency_conflict');
+      }
+      const account = await client.query<{ balance: number }>(
+        `SELECT balance FROM energy_accounts WHERE user_id = $1`,
+        [input.senderId],
+      );
+      return { tip, balance: account.rows[0]!.balance, duplicate: true };
+    }
+
+    const lockedPost = await client.query<{ user_id: string }>(
+      `SELECT user_id FROM feed_posts WHERE id = $1 FOR SHARE`,
+      [input.postId],
+    );
+    if (!lockedPost.rows[0]) throw new FeedTipError('post_not_found');
+    if (lockedPost.rows[0].user_id !== recipientId) throw new FeedTipError('post_not_found');
+
+    const accounts = await client.query<{ user_id: string; balance: number }>(
+      `SELECT user_id, balance
+       FROM energy_accounts
+       WHERE user_id IN ($1, $2)
+       ORDER BY user_id
+       FOR UPDATE`,
+      [input.senderId, recipientId],
+    );
+    const senderBalance = accounts.rows.find((row) => row.user_id === input.senderId)?.balance ?? 0;
+    if (senderBalance < input.amount) throw new FeedTipError('insufficient_energy');
+
+    const inserted = await client.query<{
+      id: string;
+      post_id: string;
+      sender_id: string;
+      recipient_id: string;
+      amount: number;
+      idempotency_key: string;
+      created_at: Date;
+    }>(
+      `INSERT INTO feed_tips (post_id, sender_id, recipient_id, amount, idempotency_key)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, post_id, sender_id, recipient_id, amount, idempotency_key, created_at`,
+      [input.postId, input.senderId, recipientId, input.amount, input.idempotencyKey],
+    );
+    const tip = inserted.rows[0]!;
+    const sourceId = `feed_tip:${tip.id}`;
+
+    await client.query(
+      `INSERT INTO energy_transactions
+         (user_id, type, amount, description, source_id, related_user_id)
+       VALUES
+         ($1, 'transfer_out', $3, '星河动态打赏', $4, $2),
+         ($2, 'transfer_in', $3, '星河动态获赏', $4, $1)`,
+      [input.senderId, recipientId, input.amount, sourceId],
+    );
+    const updated = await client.query<{ balance: number }>(
+      `UPDATE energy_accounts
+       SET balance = balance - $2,
+           total_spent = total_spent + $2,
+           version = version + 1,
+           updated_at = NOW()
+       WHERE user_id = $1
+       RETURNING balance`,
+      [input.senderId, input.amount],
+    );
+    await client.query(
+      `UPDATE energy_accounts
+       SET balance = balance + $2,
+           total_earned = total_earned + $2,
+           version = version + 1,
+           updated_at = NOW()
+       WHERE user_id = $1`,
+      [recipientId, input.amount],
+    );
+
+    return { tip, balance: updated.rows[0]!.balance, duplicate: false };
   });
 }
 

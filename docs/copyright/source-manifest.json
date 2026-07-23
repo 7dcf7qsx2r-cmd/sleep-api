@@ -1,0 +1,15 @@
+{
+  "softwareName": "小眠 AI 睡眠健康服务后台软件",
+  "version": "V1.0.0",
+  "fileCount": 44,
+  "totalLines": 4667,
+  "totalPages": 94,
+  "excludedFiles": [
+    "src/routes/ai.ts",
+    "src/lib/deepseek.ts",
+    "src/lib/siliconflowTts.ts",
+    "src/lib/siliconflowStt.ts",
+    "src/lib/siliconflowImage.ts"
+  ],
+  "output": "docs/copyright/source-material.html"
+}

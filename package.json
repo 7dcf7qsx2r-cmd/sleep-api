@@ -12,6 +12,7 @@
     "db:seed": "tsx src/db/seed.ts",
     "db:setup": "npm run db:migrate && npm run db:seed",
     "db:setup:pglite": "USE_PGLITE=1 npm run db:setup",
+    "test": "tsx --test tests/**/*.test.ts",
     "smoke": "tsx scripts/smoke-p0.ts",
     "integration": "tsx scripts/integration-p0-p1.ts",
     "integration:p2": "tsx scripts/integration-p2.ts",

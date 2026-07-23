@@ -19,7 +19,13 @@ import {
   getPostById,
   createPost,
   listFeed,
+  encodeFeedCursor,
   toggleLike,
+  listFeedComments,
+  createFeedComment,
+  toggleFollow,
+  tipPost,
+  reportPost,
   getNightSchoolCohort,
   commitNightLabExperiment,
   getNightLabGroup,
@@ -33,7 +39,7 @@ import {
   leaveCurrentSleepSquad,
   recordSleepSquadCheckIn,
 } from '../services/social.js';
-import { completeTask } from '../services/energyLedger.js';
+import { completeTask, FeedTipError } from '../services/energyLedger.js';
 import { enqueueJob } from '../services/jobQueue.js';
 import { saveUploadedImage } from '../lib/saveUploadedImage.js';
 
@@ -498,7 +504,10 @@ socialRoutes.post(
     'json',
     z.object({
       type: z.enum(['milestone', 'dream_share', 'check_in', 'achievement']),
-      content: z.record(z.unknown()),
+      content: z.record(z.unknown()).refine(
+        (value) => JSON.stringify(value).length <= 20_000,
+        'content_too_large',
+      ),
     }),
   ),
   async (c) => {
@@ -519,14 +528,27 @@ socialRoutes.post(
   },
 );
 
-socialRoutes.get('/feed', async (c) => {
-  const auth = c.get('auth');
-  if (auth.type !== 'user') return c.json({ error: 'guest_not_allowed' }, 403);
-  const cursor = c.req.query('cursor');
-  const limit = Math.min(parseInt(c.req.query('limit') ?? '20', 10), 50);
-  const posts = await listFeed(cursor, limit, auth.sub);
-  return c.json({ posts, nextCursor: posts.length === limit ? posts[posts.length - 1]?.created_at : null });
-});
+socialRoutes.get(
+  '/feed',
+  zValidator(
+    'query',
+    z.object({
+      cursor: z.string().max(512).optional(),
+      limit: z.coerce.number().int().min(1).max(50).default(20),
+    }),
+  ),
+  async (c) => {
+    const auth = c.get('auth');
+    if (auth.type !== 'user') return c.json({ error: 'guest_not_allowed' }, 403);
+    const { cursor, limit } = c.req.valid('query');
+    const posts = await listFeed(cursor, limit, auth.sub);
+    const nextCursor = posts.length === limit && posts[posts.length - 1]
+      ? encodeFeedCursor(posts[posts.length - 1] as { created_at: Date | string; id: string })
+      : null;
+    // Keep nextCursor for the current RN adapter while exposing snake_case.
+    return c.json({ posts, next_cursor: nextCursor, nextCursor });
+  },
+);
 
 socialRoutes.post('/feed/:id/like', async (c) => {
   const auth = c.get('auth');
@@ -556,3 +578,122 @@ socialRoutes.post('/feed/:id/like', async (c) => {
 
   return c.json({ ok: true, liked: result.liked });
 });
+
+socialRoutes.get(
+  '/feed/:id/comments',
+  zValidator('param', z.object({ id: z.string().uuid() })),
+  zValidator(
+    'query',
+    z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) }),
+  ),
+  async (c) => {
+    const auth = c.get('auth');
+    if (auth.type !== 'user') return c.json({ error: 'guest_not_allowed' }, 403);
+    const { id } = c.req.valid('param');
+    if (!(await getPostById(id))) return c.json({ error: 'post_not_found' }, 404);
+    const { limit } = c.req.valid('query');
+    return c.json({ comments: await listFeedComments(id, limit) });
+  },
+);
+
+socialRoutes.post(
+  '/feed/:id/comments',
+  zValidator('param', z.object({ id: z.string().uuid() })),
+  zValidator('json', z.object({ content: z.string().trim().min(1).max(500) })),
+  async (c) => {
+    const auth = c.get('auth');
+    if (auth.type !== 'user') return c.json({ error: 'guest_not_allowed' }, 403);
+    const comment = await createFeedComment(
+      auth.sub,
+      c.req.valid('param').id,
+      c.req.valid('json').content,
+    );
+    if (!comment) return c.json({ error: 'post_not_found' }, 404);
+    return c.json({ ok: true, comment }, 201);
+  },
+);
+
+socialRoutes.post(
+  '/feed/users/:id/follow',
+  zValidator('param', z.object({ id: z.string().uuid() })),
+  async (c) => {
+    const auth = c.get('auth');
+    if (auth.type !== 'user') return c.json({ error: 'guest_not_allowed' }, 403);
+    try {
+      const result = await toggleFollow(auth.sub, c.req.valid('param').id);
+      if (!result) return c.json({ error: 'user_not_found' }, 404);
+      return c.json({ ok: true, followed: result.followed });
+    } catch (error) {
+      if (error instanceof Error && error.message === 'cannot_follow_self') {
+        return c.json({ error: 'cannot_follow_self' }, 400);
+      }
+      throw error;
+    }
+  },
+);
+
+socialRoutes.post(
+  '/feed/:id/tips',
+  zValidator('param', z.object({ id: z.string().uuid() })),
+  zValidator(
+    'json',
+    z.object({
+      amount: z.number().int().positive().max(1_000_000),
+      idempotency_key: z.string().trim().min(1).max(128),
+    }),
+  ),
+  async (c) => {
+    const auth = c.get('auth');
+    if (auth.type !== 'user') return c.json({ error: 'guest_not_allowed' }, 403);
+    const body = c.req.valid('json');
+    try {
+      const result = await tipPost({
+        senderId: auth.sub,
+        postId: c.req.valid('param').id,
+        amount: body.amount,
+        idempotencyKey: body.idempotency_key,
+      });
+      return c.json({
+        ok: true,
+        tip: result.tip,
+        balance: result.balance,
+        duplicate: result.duplicate,
+      }, result.duplicate ? 200 : 201);
+    } catch (error) {
+      if (!(error instanceof FeedTipError)) throw error;
+      if (error.code === 'post_not_found') return c.json({ error: error.code }, 404);
+      if (error.code === 'insufficient_energy') return c.json({ error: error.code }, 409);
+      if (error.code === 'idempotency_conflict') return c.json({ error: error.code }, 409);
+      return c.json({ error: error.code }, 400);
+    }
+  },
+);
+
+socialRoutes.post(
+  '/feed/:id/reports',
+  zValidator('param', z.object({ id: z.string().uuid() })),
+  zValidator(
+    'json',
+    z.object({
+      reason: z.string().trim().min(1).max(64),
+      details: z.string().trim().max(1000).optional(),
+    }),
+  ),
+  async (c) => {
+    const auth = c.get('auth');
+    if (auth.type !== 'user') return c.json({ error: 'guest_not_allowed' }, 403);
+    const body = c.req.valid('json');
+    const result = await reportPost({
+      reporterId: auth.sub,
+      postId: c.req.valid('param').id,
+      reason: body.reason,
+      details: body.details || undefined,
+    });
+    if (!result) return c.json({ error: 'post_not_found' }, 404);
+    return c.json({
+      ok: true,
+      report: result.report,
+      duplicate: result.duplicate,
+    }, result.duplicate ? 200 : 201);
+  },
+);

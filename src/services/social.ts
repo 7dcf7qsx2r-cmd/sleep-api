@@ -1,5 +1,5 @@
 import { query } from '../db/client.js';
-import { claimReward } from './energyLedger.js';
+import { claimReward, tipFeedPost } from './energyLedger.js';
 
 /* ================================================================
    Friendships
@@ -202,18 +202,55 @@ export async function createPost(input: CreatePostInput) {
   return result.rows[0];
 }
 
+export interface FeedCursor {
+  created_at: string;
+  id: string;
+}
+
+export function encodeFeedCursor(row: { created_at: Date | string; id: string }): string {
+  const createdAt = row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at;
+  return Buffer.from(JSON.stringify({ created_at: createdAt, id: row.id })).toString('base64url');
+}
+
+export function decodeFeedCursor(cursor: string): FeedCursor | { created_at: string; id?: undefined } | null {
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as Partial<FeedCursor>;
+    if (
+      typeof parsed.created_at === 'string'
+      && !Number.isNaN(Date.parse(parsed.created_at))
+      && typeof parsed.id === 'string'
+      && /^[0-9a-f-]{36}$/i.test(parsed.id)
+    ) {
+      return { created_at: parsed.created_at, id: parsed.id };
+    }
+  } catch {
+    // Fall through to the legacy timestamp cursor.
+  }
+  return !Number.isNaN(Date.parse(cursor)) ? { created_at: cursor } : null;
+}
+
 export async function listFeed(cursor?: string, limit = 20, viewerId?: string) {
   const params: (string | number)[] = [limit];
   let whereClause = '';
 
   if (cursor) {
-    whereClause = `WHERE f.created_at < $2`;
-    params.push(cursor);
+    const decoded = decodeFeedCursor(cursor);
+    if (decoded?.id) {
+      whereClause = `WHERE (f.created_at, f.id) < ($2::timestamptz, $3::uuid)`;
+      params.push(decoded.created_at, decoded.id);
+    } else if (decoded) {
+      // Backward compatibility for the previous plain created_at cursor.
+      whereClause = `WHERE f.created_at < $2::timestamptz`;
+      params.push(decoded.created_at);
+    }
   }
 
   const likedClause = viewerId
     ? `EXISTS (SELECT 1 FROM feed_likes l WHERE l.post_id = f.id AND l.user_id = $${params.length + 1}) as liked_by_me`
     : `FALSE as liked_by_me`;
+  const followedClause = viewerId
+    ? `EXISTS (SELECT 1 FROM user_follows uf WHERE uf.followed_id = f.user_id AND uf.follower_id = $${params.length + 1}) as followed_by_me`
+    : `FALSE as followed_by_me`;
 
   const allParams = viewerId ? [...params, viewerId] : params;
 
@@ -221,12 +258,21 @@ export async function listFeed(cursor?: string, limit = 20, viewerId?: string) {
     `SELECT f.*,
        u.username as author_name,
        up.nickname as author_nickname,
-       ${likedClause}
+       up.avatar_url as author_avatar,
+       COALESCE(profile_blob.data->>'sleepType', persona_blob.data->>'sleepType') as author_sleep_type,
+       ${likedClause},
+       ${followedClause},
+       (SELECT COUNT(*)::int FROM feed_comments c WHERE c.post_id = f.id) as comment_count,
+       (SELECT COALESCE(SUM(t.amount), 0)::int FROM feed_tips t WHERE t.post_id = f.id) as tip_amount
      FROM feed_posts f
      JOIN users u ON u.id = f.user_id
      LEFT JOIN user_profiles up ON up.user_id = f.user_id
+     LEFT JOIN data_blobs profile_blob
+       ON profile_blob.owner_type = 'user' AND profile_blob.owner_id = f.user_id AND profile_blob.domain = 'profile'
+     LEFT JOIN data_blobs persona_blob
+       ON persona_blob.owner_type = 'user' AND persona_blob.owner_id = f.user_id AND persona_blob.domain = 'persona'
      ${whereClause}
-     ORDER BY f.created_at DESC
+     ORDER BY f.created_at DESC, f.id DESC
      LIMIT $1`,
     allParams,
   );
@@ -262,6 +308,90 @@ export async function toggleLike(userId: string, postId: string) {
     await query(`UPDATE feed_posts SET like_count = like_count + 1 WHERE id = $1`, [postId]);
     return { liked: true };
   }
+}
+
+export async function listFeedComments(postId: string, limit = 100) {
+  const result = await query(
+    `SELECT c.id, c.post_id, c.user_id, c.content, c.created_at,
+            u.username as author_name, up.nickname as author_nickname,
+            up.avatar_url as author_avatar
+     FROM feed_comments c
+     JOIN users u ON u.id = c.user_id
+     LEFT JOIN user_profiles up ON up.user_id = c.user_id
+     WHERE c.post_id = $1
+     ORDER BY c.created_at ASC, c.id ASC
+     LIMIT $2`,
+    [postId, limit],
+  );
+  return result.rows;
+}
+
+export async function createFeedComment(userId: string, postId: string, content: string) {
+  const result = await query(
+    `INSERT INTO feed_comments (post_id, user_id, content)
+     SELECT $1, $2, $3
+     WHERE EXISTS (SELECT 1 FROM feed_posts WHERE id = $1)
+     RETURNING *`,
+    [postId, userId, content],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function toggleFollow(followerId: string, followedId: string) {
+  if (followerId === followedId) throw new Error('cannot_follow_self');
+  const removed = await query(
+    `DELETE FROM user_follows
+     WHERE follower_id = $1 AND followed_id = $2
+     RETURNING followed_id`,
+    [followerId, followedId],
+  );
+  if (removed.rows[0]) return { followed: false };
+
+  const inserted = await query(
+    `INSERT INTO user_follows (follower_id, followed_id)
+     SELECT $1, $2
+     WHERE EXISTS (SELECT 1 FROM users WHERE id = $2 AND deleted_at IS NULL)
+     ON CONFLICT DO NOTHING
+     RETURNING followed_id`,
+    [followerId, followedId],
+  );
+  if (inserted.rows[0]) return { followed: true };
+  const existing = await query(
+    `SELECT 1 FROM user_follows WHERE follower_id = $1 AND followed_id = $2`,
+    [followerId, followedId],
+  );
+  return existing.rows[0] ? { followed: true } : null;
+}
+
+export async function tipPost(input: {
+  senderId: string;
+  postId: string;
+  amount: number;
+  idempotencyKey: string;
+}) {
+  return tipFeedPost(input);
+}
+
+export async function reportPost(input: {
+  reporterId: string;
+  postId: string;
+  reason: string;
+  details?: string;
+}) {
+  const result = await query(
+    `INSERT INTO feed_reports (post_id, reporter_id, reason, details)
+     SELECT $1, $2, $3, $4
+     WHERE EXISTS (SELECT 1 FROM feed_posts WHERE id = $1)
+     ON CONFLICT (post_id, reporter_id) DO NOTHING
+     RETURNING *`,
+    [input.postId, input.reporterId, input.reason, input.details ?? null],
+  );
+  if (result.rows[0]) return { report: result.rows[0], duplicate: false };
+  const existing = await query(
+    `SELECT * FROM feed_reports WHERE post_id = $1 AND reporter_id = $2`,
+    [input.postId, input.reporterId],
+  );
+  return existing.rows[0] ? { report: existing.rows[0], duplicate: true } : null;
 }
 
 /* ================================================================

@@ -295,6 +295,51 @@ const MIGRATION_STATEMENTS = [
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (user_id, post_id)
   )`,
+  `CREATE TABLE IF NOT EXISTS feed_comments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    post_id UUID NOT NULL REFERENCES feed_posts(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    content TEXT NOT NULL CHECK (char_length(content) BETWEEN 1 AND 500),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_feed_comments_post_created
+   ON feed_comments (post_id, created_at ASC, id ASC)`,
+
+  `CREATE TABLE IF NOT EXISTS user_follows (
+    follower_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    followed_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (follower_id, followed_id),
+    CHECK (follower_id <> followed_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_user_follows_followed
+   ON user_follows (followed_id, created_at DESC)`,
+
+  `CREATE TABLE IF NOT EXISTS feed_tips (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    post_id UUID NOT NULL REFERENCES feed_posts(id) ON DELETE CASCADE,
+    sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    recipient_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount INT NOT NULL CHECK (amount > 0),
+    idempotency_key TEXT NOT NULL CHECK (char_length(idempotency_key) BETWEEN 1 AND 128),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (sender_id, idempotency_key),
+    CHECK (sender_id <> recipient_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_feed_tips_post_created
+   ON feed_tips (post_id, created_at DESC)`,
+
+  `CREATE TABLE IF NOT EXISTS feed_reports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    post_id UUID NOT NULL REFERENCES feed_posts(id) ON DELETE CASCADE,
+    reporter_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    reason TEXT NOT NULL CHECK (char_length(reason) BETWEEN 1 AND 64),
+    details TEXT CHECK (details IS NULL OR char_length(details) <= 1000),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (post_id, reporter_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_feed_reports_created
+   ON feed_reports (created_at DESC)`,
 
   `CREATE TABLE IF NOT EXISTS night_school_checkins (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
