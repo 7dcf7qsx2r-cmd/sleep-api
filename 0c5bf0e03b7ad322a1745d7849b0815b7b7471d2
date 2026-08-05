@@ -1,0 +1,34 @@
+src/routes/garden.ts
+  b78fb03c9a460683 1-128
+src/db/migrate.ts
+  b78fb03c9a460683 582-615
+src/services/garden.ts
+  b78fb03c9a460683 1-429
+src/services/energyLedger.ts
+  b78fb03c9a460683 45-51
+tests/garden-visit.test.ts
+  b78fb03c9a460683 1-208
+src/app.ts
+  b78fb03c9a460683 12,54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "0c5bf0e03b7ad322a1745d7849b0815b7b7471d2",
+  "prompts": {
+    "b78fb03c9a460683": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "496febe2-3b48-4e8c-afbe-82e0f6e70de7",
+        "model": "grok-4.5"
+      },
+      "human_author": "pengjun5437513 <cunminjia@qq.com>",
+      "messages": [],
+      "total_additions": 820,
+      "total_deletions": 13,
+      "accepted_lines": 808,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/13923b58acc920f4a466c1f8ec7ded898add2d113df9e62759033697ebc53aac"
+    }
+  }
+}
