@@ -579,6 +579,40 @@ const MIGRATION_STATEMENTS = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON admin_audit_logs (created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_admin_audit_resource ON admin_audit_logs (resource_type, resource_id)`,
+
+  // === Dream Garden (multiplayer visit / overflow dew) ===
+  `CREATE TABLE IF NOT EXISTS user_gardens (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    plants_json JSONB NOT NULL DEFAULT '[]',
+    overflow_dew INT NOT NULL DEFAULT 0 CHECK (overflow_dew >= 0),
+    overflow_dew_day DATE,
+    plot_count INT NOT NULL DEFAULT 0 CHECK (plot_count >= 0),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_user_gardens_overflow
+   ON user_gardens (overflow_dew_day, overflow_dew)
+   WHERE overflow_dew > 0`,
+
+  `CREATE TABLE IF NOT EXISTS garden_visit_daily (
+    visitor_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    day DATE NOT NULL,
+    visit_count INT NOT NULL DEFAULT 0 CHECK (visit_count >= 0),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (visitor_id, day)
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS garden_dew_claims (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    visitor_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    day DATE NOT NULL,
+    claim_seq INT NOT NULL,
+    earned_se INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (visitor_id, owner_id, day, claim_seq)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_garden_dew_claims_visitor_day
+   ON garden_dew_claims (visitor_id, day)`,
 ];
 
 async function main() {

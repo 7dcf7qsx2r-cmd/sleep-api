@@ -5,7 +5,7 @@ import { requireAuth, type AuthVariables } from '../middleware/auth.js';
 import { callDeepSeek } from '../lib/deepseek.js';
 import { generateSiliconFlowImage } from '../lib/siliconflowImage.js';
 import { synthesizeSiliconFlowSpeech, fetchSiliconFlowSpeechStream } from '../lib/siliconflowTts.js';
-import { transcribeSiliconFlowAudio } from '../lib/siliconflowStt.js';
+import { transcribeSiliconFlowAudio, sttFailureMessage } from '../lib/siliconflowStt.js';
 import { createTtsStreamSession, consumeTtsStreamSession } from '../lib/ttsStreamSession.js';
 import { checkAndIncrement, getQuotaSnapshot } from '../services/quota.js';
 import { ownerFromAuth } from '../lib/owner.js';
@@ -845,17 +845,17 @@ aiRoutes.post('/stt/transcribe', async (c) => {
     return c.json({ error: 'empty_file', message: '音频为空' }, 400);
   }
 
-  const text = await transcribeSiliconFlowAudio(
+  const stt = await transcribeSiliconFlowAudio(
     bytes,
     file.name || 'voice.m4a',
     file.type || 'audio/mp4',
   );
-  if (!text) {
+  if (!stt.text) {
     return c.json({
       error: 'stt_failed',
-      message: '语音识别不可用，请配置 SILICONFLOW_API_KEY',
+      message: sttFailureMessage(stt),
     }, 503);
   }
 
-  return c.json({ text });
+  return c.json({ text: stt.text });
 });

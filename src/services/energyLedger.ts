@@ -42,7 +42,13 @@ function todayStr(): string {
 }
 
 async function withClient<T>(fn: (client: import('pg').PoolClient) => Promise<T>): Promise<T> {
-  if (!pool) throw new Error('PG pool not available in PGlite mode');
+  // PGlite 无 pool：用 query 直写（无事务），便于本地联调 / 单测
+  if (!pool) {
+    const shim = {
+      query: (text: string, params?: unknown[]) => query(text, params),
+    } as unknown as import('pg').PoolClient;
+    return fn(shim);
+  }
   const client = await pool.connect();
   try {
     await client.query('BEGIN');

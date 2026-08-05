@@ -9,6 +9,7 @@ import { syncRoutes } from './routes/sync.js';
 import { energyRoutes } from './routes/energy.js';
 import { shopRoutes } from './routes/shop.js';
 import { socialRoutes } from './routes/social.js';
+import { gardenRoutes } from './routes/garden.js';
 import { pushRoutes } from './routes/push.js';
 import { radarRoutes } from './routes/radar.js';
 import { adminRoutes } from './routes/admin/index.js';
@@ -50,6 +51,7 @@ export function createApp() {
   app.route('/energy', energyRoutes);
   app.route('/shop', shopRoutes);
   app.route('/social', socialRoutes);
+  app.route('/social/garden', gardenRoutes);
   app.route('/push', pushRoutes);
   app.route('/api/radar', radarRoutes);
   app.route('/experts', expertRoutes);
