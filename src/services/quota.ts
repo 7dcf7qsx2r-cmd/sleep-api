@@ -24,11 +24,12 @@ async function getUsage(subjectType: SubjectType, subjectId: string) {
 export async function getQuotaSnapshot(subjectType: SubjectType, subjectId: string) {
   const lim = limits(subjectType);
   const usage = await getUsage(subjectType, subjectId);
+  const unlimited = (n: number) => (n <= 0 ? null : n);
   return {
     subjectType,
     subjectId,
-    chat: { used: usage.chat_count, limit: lim.chat },
-    interpret: { used: usage.interpret_count, limit: lim.interpret },
+    chat: { used: usage.chat_count, limit: unlimited(lim.chat) },
+    interpret: { used: usage.interpret_count, limit: unlimited(lim.interpret) },
   };
 }
 
@@ -55,7 +56,7 @@ export async function checkAndIncrement(
   }
 
   const current = kind === 'chat' ? usage.chat_count : usage.interpret_count;
-  if (current >= max) {
+  if (max > 0 && current >= max) {
     return { allowed: false, snapshot: await getQuotaSnapshot(subjectType, subjectId) };
   }
 

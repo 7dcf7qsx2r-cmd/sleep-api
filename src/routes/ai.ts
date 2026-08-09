@@ -222,6 +222,227 @@ aiRoutes.post(
   },
 );
 
+/** 第七章 · 今夜态壁纸文案精修（不改五维分数，只润色标题/金句） */
+const TONIGHT_PORTRAIT_SYSTEM = `你是「小眠」。用户刚完成入夜仪式，本地已算出「今夜态」五维分数与草稿文案。
+你的任务：在不改变数值含义的前提下，精修壁纸标题与金句，让用户有被理解、可带走的获得感。
+
+硬性规则：
+- 输出纯 JSON，不要 markdown
+- 不是睡眠报告，不写分数、深浅睡、效率、诊断、病理词
+- 不评判、不说教、不用 emoji
+- title：2–8 个汉字的意象名，像天气或景物（例：封口的潮汐、未散的薄雾）
+- oneLiner：一句 16–36 字，尽量回声用户原词/选项；诗意但具体
+- careHint：一条非说教行动提示，18 字内
+- echo：点名用户痕迹的短词，12 字内；若无则空字符串
+
+JSON 形状：
+{"title":"...","oneLiner":"...","careHint":"...","echo":"..."}`;
+
+interface TonightPortraitRefineInput {
+  title: string;
+  oneLiner?: string;
+  careHint?: string;
+  echo?: string;
+  weather?: string;
+  mood?: string;
+  residueIds?: string[];
+  freeText?: string;
+  features?: {
+    arousal?: number;
+    residue?: number;
+    body?: number;
+    moodWeather?: number;
+    sleepGate?: number;
+  };
+}
+
+function clampPortraitText(s: string, max: number): string {
+  return s.replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+function buildTonightPortraitFallback(input: TonightPortraitRefineInput): {
+  title: string;
+  oneLiner: string;
+  careHint: string;
+  echo: string;
+} {
+  const echo = clampPortraitText(input.echo || input.freeText || '', 16);
+  return {
+    title: clampPortraitText(input.title || '今夜薄雾', 16),
+    oneLiner: clampPortraitText(
+      input.oneLiner
+        || (echo ? `「${echo}」还在，先把它轻轻放下。` : '不是成绩单，是今晚的天气。'),
+      48,
+    ),
+    careHint: clampPortraitText(input.careHint || '先抽贴合今夜态的一幕。', 36),
+    echo,
+  };
+}
+
+function parseTonightPortraitJson(
+  raw: string,
+  input: TonightPortraitRefineInput,
+): ReturnType<typeof buildTonightPortraitFallback> | null {
+  try {
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    const p = JSON.parse(match[0]) as Partial<ReturnType<typeof buildTonightPortraitFallback>>;
+    if (!p.title || !p.oneLiner) return null;
+    const fb = buildTonightPortraitFallback(input);
+    return {
+      title: clampPortraitText(String(p.title), 16) || fb.title,
+      oneLiner: clampPortraitText(String(p.oneLiner), 48) || fb.oneLiner,
+      careHint: clampPortraitText(String(p.careHint || fb.careHint), 36),
+      echo: clampPortraitText(String(p.echo ?? fb.echo), 16),
+    };
+  } catch {
+    return null;
+  }
+}
+
+aiRoutes.post(
+  '/tonight-portrait',
+  zValidator(
+    'json',
+    z.object({
+      title: z.string().min(1).max(32),
+      oneLiner: z.string().max(80).optional(),
+      careHint: z.string().max(60).optional(),
+      echo: z.string().max(32).optional(),
+      weather: z.string().max(32).optional(),
+      mood: z.string().max(32).optional(),
+      residueIds: z.array(z.string().max(24)).max(8).optional(),
+      freeText: z.string().max(64).optional(),
+      features: z.object({
+        arousal: z.number().min(0).max(1).optional(),
+        residue: z.number().min(0).max(1).optional(),
+        body: z.number().min(0).max(1).optional(),
+        moodWeather: z.number().min(0).max(1).optional(),
+        sleepGate: z.number().min(0).max(1).optional(),
+      }).optional(),
+    }),
+  ),
+  async (c) => {
+    const auth = c.get('auth');
+    const body = c.req.valid('json');
+
+    const quota = await checkAndIncrement(auth.type, auth.sub, 'chat');
+    if (!quota.allowed) {
+      const fallback = buildTonightPortraitFallback(body);
+      return c.json({
+        ...fallback,
+        isFallback: true,
+        error: 'quota_exceeded',
+        quota: quota.snapshot,
+      });
+    }
+
+    const f = body.features;
+    const userMsg = [
+      `本地草稿标题：${body.title}`,
+      body.oneLiner ? `本地金句：${body.oneLiner}` : '',
+      body.careHint ? `本地提示：${body.careHint}` : '',
+      `心情：${body.mood ?? '未知'}`,
+      `主题天气：${body.weather ?? '未知'}`,
+      body.residueIds?.length ? `感受选项：${body.residueIds.join('、')}` : '',
+      body.freeText?.trim() ? `用户原话：${body.freeText.trim()}` : '',
+      body.echo ? `回声草稿：${body.echo}` : '',
+      f
+        ? `五维(0-1)：唤醒=${f.arousal?.toFixed(2) ?? '-'} 残留=${f.residue?.toFixed(2) ?? '-'} 身体=${f.body?.toFixed(2) ?? '-'} 心气=${f.moodWeather?.toFixed(2) ?? '-'} 闸门=${f.sleepGate?.toFixed(2) ?? '-'}`
+        : '',
+      '请精修 title / oneLiner / careHint / echo，输出 JSON。',
+    ].filter(Boolean).join('\n');
+
+    const fallback = buildTonightPortraitFallback(body);
+    const result = await callDeepSeek({
+      messages: [
+        { role: 'system', content: TONIGHT_PORTRAIT_SYSTEM },
+        { role: 'user', content: userMsg },
+      ],
+      temperature: 0.86,
+      maxTokens: 220,
+      timeoutMs: 14_000,
+      fallback: JSON.stringify(fallback),
+    });
+
+    const parsed = parseTonightPortraitJson(result.text, body);
+    const content = parsed ?? fallback;
+
+    return c.json({
+      ...content,
+      isFallback: !parsed || result.isFallback,
+      latencyMs: result.latencyMs,
+      quota: quota.snapshot,
+    });
+  },
+);
+
+const COMPANION_STYLE_ROUTE_SYSTEM = `你是小眠 Tab 对话的「风格路由器」。根据用户最新消息、最近对话、健康摘要要点、问卷陪伴偏好，判定本轮最适合的对话风格。
+
+## 三种风格
+- chat（陪聊）：情绪倾诉、陪伴、记梦、随意聊；用户明确说不要分析。
+- explain（解惑）：问原理、方法、睡眠科学知识、「为什么/怎么办/是什么」。
+- consult（咨询）：**头痛、偏头痛、疼痛、不适、症状、用药、睡不着、失眠、心理问题、焦虑反刍、是不是有病**等必须选 consult，不得选 chat。
+
+## 判定原则
+1. 结合【健康摘要】：数据异常 + 身体不适 → 倾向 consult；有数据则勿建议重复询问摘要里已有的信息。
+2. 可在多轮对话中切换风格：用户从倾诉转向问方法 → explain；报症状 → consult；说「别分析了」→ chat。
+3. 红旗症状（突发剧痛、意识障碍、中风征兆、视物言语障碍等）→ consult 且 redFlag=true。
+4. 问卷偏好仅作模糊时的轻偏置：guide→略偏 explain；listen/comfort/quiet→略偏 chat。
+
+输出纯 JSON，不要 markdown，不要解释：
+{"style":"chat|explain|consult","reason":"20字内中文依据","redFlag":false}`;
+
+aiRoutes.post(
+  '/companion-style-route',
+  zValidator(
+    'json',
+    z.object({
+      message: z.string().min(1).max(2000),
+      history: historySchema.optional(),
+      healthBrief: z.string().max(3000).optional(),
+      personaCompanionStyle: z.enum(['listen', 'comfort', 'guide', 'quiet']).optional(),
+      previousStyle: z.enum(['chat', 'explain', 'consult']).optional(),
+    }),
+  ),
+  async (c) => {
+    const body = c.req.valid('json');
+    const history = (body.history ?? []).map((h) => ({
+      role: h.role as 'user' | 'assistant',
+      content: h.content,
+    }));
+
+    const userParts = [
+      body.healthBrief?.trim()
+        ? `【健康摘要要点】\n${body.healthBrief.trim()}`
+        : '【健康摘要要点】暂无',
+      body.personaCompanionStyle
+        ? `【问卷陪伴偏好】${body.personaCompanionStyle}`
+        : '',
+      body.previousStyle ? `【上轮风格】${body.previousStyle}` : '',
+      `【用户本轮】${body.message}`,
+    ].filter(Boolean);
+
+    const result = await callDeepSeek({
+      messages: [
+        { role: 'system', content: COMPANION_STYLE_ROUTE_SYSTEM },
+        ...history,
+        { role: 'user', content: userParts.join('\n\n') },
+      ],
+      temperature: 0.2,
+      maxTokens: 120,
+      timeoutMs: 12_000,
+      fallback: '{"style":"consult","reason":"路由失败默认咨询","redFlag":false}',
+    });
+
+    return c.json({
+      text: result.text,
+      isFallback: result.isFallback,
+      latencyMs: result.latencyMs,
+    });
+  },
+);
+
 aiRoutes.post(
   '/chat',
   zValidator(
@@ -229,11 +450,11 @@ aiRoutes.post(
     z.object({
       message: z.string().min(1).max(4000),
       history: historySchema.optional(),
-      systemPrompt: z.string().max(8000).optional(),
+      systemPrompt: z.string().max(12000).optional(),
       personaContext: z.string().max(4000).optional(),
       fallback: z.string().max(500).default('嗯…我在听。有时候语言不重要，重要的是你在。'),
       temperature: z.number().min(0).max(2).optional(),
-      maxTokens: z.number().min(50).max(2000).optional(),
+      maxTokens: z.number().min(50).max(4000).optional(),
     }),
   ),
   async (c) => {
@@ -266,8 +487,8 @@ aiRoutes.post(
         { role: 'user', content: body.message },
       ],
       temperature: body.temperature ?? 0.85,
-      maxTokens: body.maxTokens ?? 500,
-      timeoutMs: 25_000,
+      maxTokens: body.maxTokens ?? 2000,
+      timeoutMs: 90_000,
       fallback: body.fallback,
     });
 

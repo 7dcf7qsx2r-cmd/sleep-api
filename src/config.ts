@@ -7,6 +7,11 @@ function intEnv(name: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+/** QUOTA_*=0 表示该类型不限次数 */
+function quotaLimit(name: string, fallback: number): number {
+  return intEnv(name, fallback);
+}
+
 const databaseUrl = process.env.DATABASE_URL ?? 'postgres://sleep:sleep@localhost:5432/sleep_api';
 
 export const config = {
@@ -53,9 +58,9 @@ export const config = {
     appSecret: process.env.WECHAT_MP_APP_SECRET ?? '',
   },
   quota: {
-    guestChat: intEnv('QUOTA_GUEST_CHAT', 15),
-    guestInterpret: intEnv('QUOTA_GUEST_INTERPRET', 2),
-    userChat: intEnv('QUOTA_USER_CHAT', 80),
-    userInterpret: intEnv('QUOTA_USER_INTERPRET', 10),
+    guestChat: quotaLimit('QUOTA_GUEST_CHAT', 15),
+    guestInterpret: quotaLimit('QUOTA_GUEST_INTERPRET', 2),
+    userChat: quotaLimit('QUOTA_USER_CHAT', 80),
+    userInterpret: quotaLimit('QUOTA_USER_INTERPRET', 10),
   },
 };
