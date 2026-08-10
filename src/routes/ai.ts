@@ -377,21 +377,30 @@ aiRoutes.post(
   },
 );
 
-const COMPANION_STYLE_ROUTE_SYSTEM = `你是小眠 Tab 对话的「风格路由器」。根据用户最新消息、最近对话、健康摘要要点、问卷陪伴偏好，判定本轮最适合的对话风格。
+const COMPANION_STYLE_ROUTE_SYSTEM = `你是小眠 Tab 的「对话意图与风险路由器」。先判断用户希望 AI 做什么，再独立判断健康风险；不要仅凭出现“失眠、焦虑、痛”等词就选择咨询。
 
-## 三种风格
-- chat（陪聊）：情绪倾诉、陪伴、记梦、随意聊；用户明确说不要分析。
-- explain（解惑）：问原理、方法、睡眠科学知识、「为什么/怎么办/是什么」。
-- consult（咨询）：**头痛、偏头痛、疼痛、不适、症状、用药、睡不着、失眠、心理问题、焦虑反刍、是不是有病**等必须选 consult，不得选 chat。
+## 请求动作 intent
+- companionship：倾诉、陪伴、记梦、随意聊，或明确说“陪我聊/不要分析”。
+- education：询问一般原理、含义、科学知识、方法比较，如“为什么失眠”“焦虑为什么影响睡眠”。
+- assessment：请求判断个人症状、用药、严重程度、是否检查或就医。
+
+## 风险 risk
+- none：日常表达或一般知识。
+- personal_health：具体个人症状、持续时间、功能受损或个人用药问题。
+- urgent：急症红旗，或自伤、自杀、轻生等心理危机信号。
 
 ## 判定原则
-1. 结合【健康摘要】：数据异常 + 身体不适 → 倾向 consult；有数据则勿建议重复询问摘要里已有的信息。
-2. 可在多轮对话中切换风格：用户从倾诉转向问方法 → explain；报症状 → consult；说「别分析了」→ chat。
-3. 红旗症状（突发剧痛、意识障碍、中风征兆、视物言语障碍等）→ consult 且 redFlag=true。
-4. 问卷偏好仅作模糊时的轻偏置：guide→略偏 explain；listen/comfort/quiet→略偏 chat。
+1. urgent → consult，redFlag=true，不得降级。
+2. 用户明确要求陪伴且无 urgent → chat，即使提到轻度失眠或焦虑。
+3. 一般“为什么/是什么/原理/方法” → explain，即使句中出现失眠、焦虑。
+4. 个人症状 + 判断/处置/用药/就医诉求 → consult。
+5. 短承接语“嗯/然后呢/继续”可延续【上轮风格】，continuation=true；新诉求立即切换。
+6. 【健康摘要】只辅助风险判断，不替代本轮请求动作。
+7. 问卷偏好只在低置信模糊输入时作弱先验。
 
 输出纯 JSON，不要 markdown，不要解释：
-{"style":"chat|explain|consult","reason":"20字内中文依据","redFlag":false}`;
+{"style":"chat|explain|consult","intent":"companionship|education|assessment|unknown","risk":"none|personal_health|urgent","confidence":0.86,"continuation":false,"reason":"30字内中文依据","redFlag":false}
+其中 confidence 必须是 0 到 1 的真实置信度，不要固定照抄示例值。`;
 
 aiRoutes.post(
   '/companion-style-route',
@@ -430,9 +439,9 @@ aiRoutes.post(
         { role: 'user', content: userParts.join('\n\n') },
       ],
       temperature: 0.2,
-      maxTokens: 120,
+      maxTokens: 180,
       timeoutMs: 12_000,
-      fallback: '{"style":"consult","reason":"路由失败默认咨询","redFlag":false}',
+      fallback: '{"style":"chat","intent":"unknown","risk":"none","confidence":0,"continuation":false,"reason":"路由服务降级，由客户端规则接管","redFlag":false}',
     });
 
     return c.json({
