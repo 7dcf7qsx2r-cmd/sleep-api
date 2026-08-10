@@ -1,0 +1,28 @@
+src/db/migrate.ts
+  b78fb03c9a460683 202-218
+src/routes/experts.ts
+  b78fb03c9a460683 2-3,5-10,14-77,82
+src/services/expertConsultations.ts
+  b78fb03c9a460683 1-127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.17",
+  "base_commit_sha": "51d697539b24365b7f7dd6dfae8a2877b8a47ed2",
+  "prompts": {
+    "b78fb03c9a460683": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "496febe2-3b48-4e8c-afbe-82e0f6e70de7",
+        "model": "composer-2.5"
+      },
+      "human_author": "pengjun5437513 <cunminjia@qq.com>",
+      "messages": [],
+      "total_additions": 218,
+      "total_deletions": 0,
+      "accepted_lines": 218,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/e758e7b8f20ab132a11cd066b120d02c3f880c6210b3574696ca318457c6f853"
+    }
+  }
+}
