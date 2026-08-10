@@ -1,0 +1,24 @@
+src/routes/ai.ts
+  b78fb03c9a460683 380,382-390,393-399,402-403,442,444
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.17",
+  "base_commit_sha": "0519c11cd56e92c3c98aa4eae2bbef35ee56ec12",
+  "prompts": {
+    "b78fb03c9a460683": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "496febe2-3b48-4e8c-afbe-82e0f6e70de7",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "pengjun5437513 <cunminjia@qq.com>",
+      "messages": [],
+      "total_additions": 22,
+      "total_deletions": 13,
+      "accepted_lines": 21,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/b24e8d02270e1649f90cbcfb4e70e282e36a908fd9dbdb037081e69f9c441787"
+    }
+  }
+}
