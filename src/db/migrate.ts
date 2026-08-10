@@ -199,6 +199,23 @@ const MIGRATION_STATEMENTS = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_expert_schedules_expert
    ON expert_schedules (expert_id, weekday, start_time)`,
+  `CREATE TABLE IF NOT EXISTS expert_consultations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    expert_id UUID NOT NULL REFERENCES experts(id) ON DELETE RESTRICT,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    question TEXT NOT NULL,
+    preferred_time TEXT NOT NULL,
+    privacy_consent BOOLEAN NOT NULL DEFAULT TRUE,
+    status TEXT NOT NULL DEFAULT 'submitted'
+      CHECK (status IN ('submitted', 'accepted', 'replied', 'completed', 'cancelled')),
+    expert_reply TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_expert_consultations_user
+   ON expert_consultations (user_id, created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_expert_consultations_expert
+   ON expert_consultations (expert_id, created_at DESC)`,
 
   `CREATE TABLE IF NOT EXISTS content_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
