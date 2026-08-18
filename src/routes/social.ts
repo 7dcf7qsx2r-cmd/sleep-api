@@ -33,12 +33,15 @@ import {
   listNightSchoolWallNotes,
   revealNightLabExperiment,
   upsertNightSchoolCheckIn,
+} from '../services/social.js';
+import {
   claimSleepSquadReward,
-  getCurrentSleepSquad,
+  getSleepSquadState,
   joinSleepSquad,
   leaveCurrentSleepSquad,
   recordSleepSquadCheckIn,
-} from '../services/social.js';
+  SleepSquadError,
+} from '../services/sleepSquad.js';
 import { completeTask, FeedTipError } from '../services/energyLedger.js';
 import { enqueueJob } from '../services/jobQueue.js';
 import { saveUploadedImage } from '../lib/saveUploadedImage.js';
@@ -271,8 +274,7 @@ socialRoutes.use('/squad/*', requireAuth);
 socialRoutes.get('/squad/current', async (c) => {
   const auth = c.get('auth');
   if (auth.type !== 'user') return c.json({ error: 'guest_not_allowed' }, 403);
-  const squad = await getCurrentSleepSquad(auth.sub);
-  return c.json({ squad });
+  return c.json(await getSleepSquadState(auth.sub));
 });
 
 socialRoutes.post(
@@ -288,12 +290,19 @@ socialRoutes.post(
     const auth = c.get('auth');
     if (auth.type !== 'user') return c.json({ error: 'guest_not_allowed' }, 403);
     const body = c.req.valid('json');
-    const squad = await joinSleepSquad({
-      userId: auth.sub,
-      sleepType: body.sleepType,
-      mainConcern: body.mainConcern,
-    });
-    return c.json({ squad });
+    try {
+      const squad = await joinSleepSquad({
+        userId: auth.sub,
+        sleepType: body.sleepType,
+        mainConcern: body.mainConcern,
+      });
+      return c.json({ squad });
+    } catch (err) {
+      if (err instanceof SleepSquadError) {
+        return c.json({ error: err.code, message: err.message, squad: null }, 400);
+      }
+      throw err;
+    }
   },
 );
 

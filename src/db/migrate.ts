@@ -519,6 +519,35 @@ const MIGRATION_STATEMENTS = [
     claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (squad_id, user_id, week_key)
   )`,
+  `ALTER TABLE sleep_squads ADD COLUMN IF NOT EXISTS squad_no INT NOT NULL DEFAULT 1`,
+  `ALTER TABLE sleep_squads ADD COLUMN IF NOT EXISTS max_members INT NOT NULL DEFAULT 50`,
+  `ALTER TABLE sleep_squads ADD COLUMN IF NOT EXISTS target_count INT NOT NULL DEFAULT 120`,
+  `ALTER TABLE sleep_squads ALTER COLUMN pool_reward_se SET DEFAULT 500`,
+  `UPDATE sleep_squads SET pool_reward_se = 500 WHERE pool_reward_se = 80`,
+  `UPDATE sleep_squads SET target_count = 120 WHERE target_count = 10 OR target_nights = 10`,
+  `WITH numbered AS (
+     SELECT id, ROW_NUMBER() OVER (PARTITION BY sleep_type, week_key ORDER BY created_at, id) AS rn
+     FROM sleep_squads
+   )
+   UPDATE sleep_squads s SET squad_no = numbered.rn FROM numbered WHERE s.id = numbered.id`,
+  `ALTER TABLE sleep_squads DROP CONSTRAINT IF EXISTS sleep_squads_sleep_type_main_concern_week_key_key`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS sleep_squads_type_week_no
+   ON sleep_squads (sleep_type, week_key, squad_no)`,
+  `CREATE INDEX IF NOT EXISTS idx_sleep_squads_type_week
+   ON sleep_squads (sleep_type, week_key)`,
+  `CREATE TABLE IF NOT EXISTS sleep_squad_contributions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    squad_id UUID NOT NULL REFERENCES sleep_squads(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('last_night', 'feed')),
+    occurred_on DATE NOT NULL,
+    source_id TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (squad_id, user_id, kind, occurred_on)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_sleep_squad_contributions_squad
+   ON sleep_squad_contributions (squad_id, user_id)`,
+  `ALTER TABLE sleep_squad_rewards ADD COLUMN IF NOT EXISTS claimed_se INT NOT NULL DEFAULT 0`,
 
   `CREATE TABLE IF NOT EXISTS push_devices (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -3,6 +3,7 @@
  */
 import { query, pool } from '../db/client.js';
 import { claimReward } from './energyLedger.js';
+import { weekKey } from './sleepSquad.js';
 
 export const GARDEN_DEW_PER_HARVEST_DAY = 3;
 export const GARDEN_DEW_VISIT_SE = 2;
@@ -11,14 +12,6 @@ export const GARDEN_PLOT_MAX = 7;
 
 function todayStr(): string {
   return new Date().toISOString().split('T')[0]!;
-}
-
-function weekKey(d = new Date()): string {
-  const day = new Date(d);
-  day.setHours(0, 0, 0, 0);
-  const dow = day.getDay() || 7;
-  day.setDate(day.getDate() - dow + 1);
-  return day.toISOString().slice(0, 10);
 }
 
 export type GardenPlantJson = Record<string, unknown>;

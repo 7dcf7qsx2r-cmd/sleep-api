@@ -356,6 +356,7 @@ export async function earnEnergy(
   amount: number,
   description: string,
   sourceId: string,
+  options?: { ignoreDailyCap?: boolean },
 ): Promise<{ earned: number; account: EnergyAccountDto; duplicate?: boolean }> {
   if (amount <= 0) {
     const account = await ensureEnergyAccount(userId);
@@ -382,10 +383,12 @@ export async function earnEnergy(
       [userId],
     );
     let earn = amount;
-    const dailyEarned = accRow.rows[0]?.daily_earned ?? 0;
-    const dailyCap = accRow.rows[0]?.daily_cap ?? 200;
-    if (dailyEarned + earn > dailyCap) {
-      earn = dailyCap - dailyEarned;
+    if (!options?.ignoreDailyCap) {
+      const dailyEarned = accRow.rows[0]?.daily_earned ?? 0;
+      const dailyCap = accRow.rows[0]?.daily_cap ?? 200;
+      if (dailyEarned + earn > dailyCap) {
+        earn = dailyCap - dailyEarned;
+      }
     }
     if (earn <= 0) {
       const account = await ensureEnergyAccount(userId);
@@ -400,10 +403,10 @@ export async function earnEnergy(
     await client.query(
       `UPDATE energy_accounts
        SET balance = balance + $2, total_earned = total_earned + $2,
-           daily_earned = daily_earned + $2,
+           daily_earned = daily_earned + CASE WHEN $3 THEN 0 ELSE $2 END,
            version = version + 1, updated_at = NOW()
        WHERE user_id = $1`,
-      [userId, earn],
+      [userId, earn, Boolean(options?.ignoreDailyCap)],
     );
 
     const account = await getEnergyAccountWithClient(client, userId);
@@ -562,8 +565,9 @@ export async function claimReward(
   sourceId: string,
   amount: number,
   description: string,
+  options?: { ignoreDailyCap?: boolean },
 ): Promise<{ earned: number; account: EnergyAccountDto }> {
   const fullSourceId = `claim:${claimType}:${sourceId}`;
-  const result = await earnEnergy(userId, amount, description, fullSourceId);
+  const result = await earnEnergy(userId, amount, description, fullSourceId, options);
   return { earned: result.earned, account: result.account };
 }

@@ -36,6 +36,35 @@ export async function query<T extends pg.QueryResultRow = pg.QueryResultRow>(
   return pgPool!.query<T>(text, params);
 }
 
+export type SqlQuery = typeof query;
+
+export async function withTransaction<T>(fn: (q: SqlQuery) => Promise<T>): Promise<T> {
+  if (config.usePglite) {
+    await query('BEGIN');
+    try {
+      const result = await fn(query);
+      await query('COMMIT');
+      return result;
+    } catch (err) {
+      await query('ROLLBACK').catch(() => undefined);
+      throw err;
+    }
+  }
+  const client = await pgPool!.connect();
+  try {
+    await client.query('BEGIN');
+    const q: SqlQuery = (text, params) => client.query(text, params);
+    const result = await fn(q);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 export async function closeDb(): Promise<void> {
   if (pgPool) {
     await pgPool.end();

@@ -1,5 +1,19 @@
 import { query } from '../db/client.js';
-import { claimReward, tipFeedPost } from './energyLedger.js';
+import { tipFeedPost } from './energyLedger.js';
+import { recordSleepSquadContributionFromPost } from './sleepSquad.js';
+
+export {
+  SleepSquadError,
+  allocateLargestRemainder,
+  claimSleepSquadReward,
+  getCurrentSleepSquad,
+  getSleepSquadState,
+  joinSleepSquad,
+  leaveCurrentSleepSquad,
+  recordSleepSquadCheckIn,
+  recordSleepSquadContributionFromPost,
+} from './sleepSquad.js';
+export type { PendingSquadClaim, SleepSquadDto, SleepSquadState, SquadLeaderEntry } from './sleepSquad.js';
 
 /* ================================================================
    Friendships
@@ -199,7 +213,18 @@ export async function createPost(input: CreatePostInput) {
     `INSERT INTO feed_posts (user_id, type, content_json) VALUES ($1, $2, $3) RETURNING *`,
     [input.userId, input.type, JSON.stringify(input.contentJson)],
   );
-  return result.rows[0];
+  const post = result.rows[0];
+  try {
+    await recordSleepSquadContributionFromPost(
+      input.userId,
+      input.type,
+      input.contentJson,
+      post?.id,
+    );
+  } catch {
+    // 小队表在部分单测环境可能尚未建表
+  }
+  return post;
 }
 
 export interface FeedCursor {
@@ -400,14 +425,6 @@ export async function reportPost(input: {
 
 function todayDate(): string {
   return new Date().toISOString().slice(0, 10);
-}
-
-function weekKey(d = new Date()): string {
-  const day = new Date(d);
-  day.setHours(0, 0, 0, 0);
-  const dow = day.getDay() || 7;
-  day.setDate(day.getDate() - dow + 1);
-  return day.toISOString().slice(0, 10);
 }
 
 function displayName(row: { nickname?: string | null; username?: string | null; id: string }): string {
@@ -696,189 +713,3 @@ export async function getNightLabGroupResult(params: {
 }
 
 
-/* ================================================================
-   Sleep Squads
-   ================================================================ */
-
-const SQUAD_TARGET_NIGHTS = 10;
-const SQUAD_REWARD_SE = 80;
-
-export async function joinSleepSquad(input: {
-  userId: string;
-  sleepType: string;
-  mainConcern?: string;
-}) {
-  const wk = weekKey();
-  const squad = await query<{ id: string }>(
-    `INSERT INTO sleep_squads (sleep_type, main_concern, week_key, target_nights, pool_reward_se)
-     VALUES ($1, $2, $3::date, $4, $5)
-     ON CONFLICT (sleep_type, main_concern, week_key)
-     DO UPDATE SET sleep_type = EXCLUDED.sleep_type
-     RETURNING id`,
-    [input.sleepType, input.mainConcern ?? null, wk, SQUAD_TARGET_NIGHTS, SQUAD_REWARD_SE],
-  );
-  const squadId = squad.rows[0]!.id;
-
-  await query(
-    `INSERT INTO sleep_squad_members (squad_id, user_id)
-     VALUES ($1, $2)
-     ON CONFLICT (squad_id, user_id)
-     DO UPDATE SET left_at = NULL`,
-    [squadId, input.userId],
-  );
-
-  return getCurrentSleepSquad(input.userId);
-}
-
-export async function leaveCurrentSleepSquad(userId: string) {
-  await query(
-    `UPDATE sleep_squad_members
-     SET left_at = NOW()
-     WHERE user_id = $1 AND left_at IS NULL`,
-    [userId],
-  );
-}
-
-export async function recordSleepSquadCheckIn(userId: string, nightDate = todayDate()) {
-  const squad = await getCurrentSleepSquadRow(userId);
-  if (!squad) return null;
-  await query(
-    `INSERT INTO sleep_squad_checkins (squad_id, user_id, night_date)
-     VALUES ($1, $2, $3::date)
-     ON CONFLICT DO NOTHING`,
-    [squad.id, userId, nightDate],
-  );
-  return getCurrentSleepSquad(userId);
-}
-
-export async function claimSleepSquadReward(userId: string) {
-  const squad = await getCurrentSleepSquadRow(userId);
-  if (!squad) return { ok: false, message: '尚未加入睡眠小队' };
-  const dto = await buildSleepSquadDto(userId, squad);
-  if (dto.rewardClaimedWeek === dto.weekKey) {
-    return { ok: false, message: '本周奖励已领取', squad: dto };
-  }
-  if (dto.poolProgress < 100) {
-    return { ok: false, message: `小队进度 ${dto.poolProgress}% ，满 100% 可领取能量池`, squad: dto };
-  }
-
-  await query(
-    `INSERT INTO sleep_squad_rewards (squad_id, user_id, week_key)
-     VALUES ($1, $2, $3::date)
-     ON CONFLICT DO NOTHING`,
-    [squad.id, userId, squad.week_key],
-  );
-  const reward = await claimReward(
-    userId,
-    'squad_weekly',
-    `${squad.id}:${squad.week_key}`,
-    squad.pool_reward_se,
-    '睡眠小队周奖励',
-  );
-  return {
-    ok: reward.earned > 0,
-    message: reward.earned > 0 ? `小队能量池已开启，获得 ${reward.earned} SE` : '本周奖励已领取',
-    rewardSe: reward.earned,
-    squad: await getCurrentSleepSquad(userId),
-  };
-}
-
-export async function getCurrentSleepSquad(userId: string) {
-  const squad = await getCurrentSleepSquadRow(userId);
-  if (!squad) return null;
-  return buildSleepSquadDto(userId, squad);
-}
-
-async function getCurrentSleepSquadRow(userId: string) {
-  const wk = weekKey();
-  const row = await query<{
-    id: string;
-    sleep_type: string;
-    main_concern: string | null;
-    week_key: string;
-    target_nights: number;
-    pool_reward_se: number;
-    joined_at: Date;
-  }>(
-    `SELECT s.id, s.sleep_type, s.main_concern, s.week_key::text,
-            s.target_nights, s.pool_reward_se, m.joined_at
-     FROM sleep_squad_members m
-     JOIN sleep_squads s ON s.id = m.squad_id
-     WHERE m.user_id = $1
-       AND m.left_at IS NULL
-       AND s.week_key = $2::date
-     ORDER BY m.joined_at DESC
-     LIMIT 1`,
-    [userId, wk],
-  );
-  return row.rows[0] ?? null;
-}
-
-async function buildSleepSquadDto(
-  userId: string,
-  squad: {
-    id: string;
-    sleep_type: string;
-    main_concern: string | null;
-    week_key: string;
-    target_nights: number;
-    pool_reward_se: number;
-    joined_at: Date;
-  },
-) {
-  const members = await query<{
-    id: string;
-    username: string | null;
-    nickname: string | null;
-    avatar_url: string | null;
-  }>(
-    `SELECT u.id, u.username, up.nickname, up.avatar_url
-     FROM sleep_squad_members m
-     JOIN users u ON u.id = m.user_id
-     LEFT JOIN user_profiles up ON up.user_id = u.id
-     WHERE m.squad_id = $1 AND m.left_at IS NULL
-     ORDER BY m.joined_at ASC`,
-    [squad.id],
-  );
-  const checkins = await query<{ user_id: string; night_date: string }>(
-    `SELECT user_id, night_date::text
-     FROM sleep_squad_checkins
-     WHERE squad_id = $1`,
-    [squad.id],
-  );
-  const reward = await query<{ claimed_at: Date }>(
-    `SELECT claimed_at
-     FROM sleep_squad_rewards
-     WHERE squad_id = $1 AND user_id = $2 AND week_key = $3::date`,
-    [squad.id, userId, squad.week_key],
-  );
-  const userCheckInDates = checkins.rows
-    .filter((row) => row.user_id === userId)
-    .map((row) => row.night_date);
-  const squadNights = checkins.rows.length;
-  const otherNights = Math.max(0, squadNights - userCheckInDates.length);
-
-  return {
-    id: squad.id,
-    label: squad.main_concern ? `${squad.sleep_type} · ${squad.main_concern}` : `${squad.sleep_type}同行小队`,
-    sleepType: squad.sleep_type,
-    mainConcern: squad.main_concern,
-    weekKey: squad.week_key,
-    poolProgress: Math.min(100, Math.round((squadNights / squad.target_nights) * 100)),
-    poolRewardSe: squad.pool_reward_se,
-    targetNights: squad.target_nights,
-    userCheckInDates,
-    squadNights,
-    otherMemberCheckIns: otherNights,
-    anonCheckIns: otherNights,
-    rewardClaimedWeek: reward.rows[0] ? squad.week_key : undefined,
-    joinedAt: squad.joined_at.toISOString(),
-    members: members.rows
-      .filter((member) => member.id !== userId)
-      .map((member) => ({
-        id: member.id,
-        alias: displayName(member),
-        avatar: member.avatar_url ?? '',
-      })),
-  };
-}
