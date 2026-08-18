@@ -327,6 +327,7 @@ socialRoutes.post('/squad/claim', async (c) => {
    Dream Bottles
    ================================================================ */
 
+socialRoutes.use('/bottles', requireAuth);
 socialRoutes.use('/bottles/*', requireAuth);
 
 socialRoutes.post(
