@@ -1,0 +1,24 @@
+src/routes/social.ts
+  4c5b675c683fbb53 330
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.3",
+  "base_commit_sha": "282c48883327cfcd35b7091a4d227b63202f403f",
+  "prompts": {
+    "4c5b675c683fbb53": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9b8d194a-3b07-4f5a-b48c-7554b28d133f",
+        "model": "composer-2.5"
+      },
+      "human_author": "pengjun5437513 <cunminjia@qq.com>",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 0,
+      "accepted_lines": 1,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/c73af5eac6f2dbeee80de36650d1c296d0235c5b152fbd5552e89ed5983b0333"
+    }
+  }
+}
