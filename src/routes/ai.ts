@@ -21,6 +21,7 @@ import {
 } from '../lib/ttsVoiceProfiles.js';
 import { recordVoiceEvent } from '../services/voiceMetrics.js';
 import { consumeFixedWindow } from '../services/rateLimit.js';
+import { canCallVoiceProvider, recordVoiceProviderResult } from '../services/providerCircuit.js';
 import {
   parseConsultTurnPayload,
   validateConsultTurnPayload,
