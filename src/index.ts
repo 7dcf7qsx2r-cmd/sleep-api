@@ -1,7 +1,9 @@
 import { serve } from '@hono/node-server';
 import * as Sentry from '@sentry/node';
-import { config } from './config.js';
+import { assertProductionConfig, config } from './config.js';
 import { createApp } from './app.js';
+
+assertProductionConfig();
 
 if (config.sentryDsn) {
   Sentry.init({

@@ -12,18 +12,26 @@ function quotaLimit(name: string, fallback: number): number {
   return intEnv(name, fallback);
 }
 
+function csvEnv(name: string, fallback: string[]): string[] {
+  const value = process.env[name]?.trim();
+  if (!value) return fallback;
+  return value.split(',').map((item) => item.trim()).filter(Boolean);
+}
+
 const databaseUrl = process.env.DATABASE_URL ?? 'postgres://sleep:sleep@localhost:5432/sleep_api';
+const nodeEnv = process.env.NODE_ENV ?? 'development';
+const jwtSecret = process.env.JWT_SECRET ?? 'dev-only-jwt-secret-change-me';
 
 export const config = {
   port: intEnv('PORT', 8787),
-  nodeEnv: process.env.NODE_ENV ?? 'development',
+  nodeEnv,
   databaseUrl,
   usePglite:
     process.env.USE_PGLITE === '1' ||
     process.env.USE_PGLITE === 'true' ||
     databaseUrl === 'pglite',
   pgliteDataDir: process.env.PGLITE_DATA_DIR ?? 'data/pglite',
-  jwtSecret: process.env.JWT_SECRET ?? 'dev-only-jwt-secret-change-me',
+  jwtSecret,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '30d',
   deepseekApiKey: process.env.DEEPSEEK_API_KEY ?? '',
   deepseekApiUrl: process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/v1/chat/completions',
@@ -60,7 +68,60 @@ export const config = {
   quota: {
     guestChat: quotaLimit('QUOTA_GUEST_CHAT', 15),
     guestInterpret: quotaLimit('QUOTA_GUEST_INTERPRET', 2),
+    guestStt: quotaLimit('QUOTA_GUEST_STT', 30),
+    guestSttSeconds: quotaLimit('QUOTA_GUEST_STT_SECONDS', 1_200),
+    guestTts: quotaLimit('QUOTA_GUEST_TTS', 60),
+    guestTtsChars: quotaLimit('QUOTA_GUEST_TTS_CHARS', 30_000),
     userChat: quotaLimit('QUOTA_USER_CHAT', 80),
     userInterpret: quotaLimit('QUOTA_USER_INTERPRET', 10),
+    userStt: quotaLimit('QUOTA_USER_STT', 120),
+    userSttSeconds: quotaLimit('QUOTA_USER_STT_SECONDS', 7_200),
+    userTts: quotaLimit('QUOTA_USER_TTS', 300),
+    userTtsChars: quotaLimit('QUOTA_USER_TTS_CHARS', 180_000),
   },
+  voice: {
+    maxSttBytes: intEnv('VOICE_STT_MAX_BYTES', 2 * 1024 * 1024),
+    maxSttDurationSec: intEnv('VOICE_STT_MAX_DURATION_SEC', 60),
+    maxTtsChars: intEnv('VOICE_TTS_MAX_CHARS', 1_800),
+    sttConcurrency: intEnv('VOICE_STT_CONCURRENCY', 4),
+    ttsConcurrency: intEnv('VOICE_TTS_CONCURRENCY', 6),
+    sttConcurrencyPerSubject: intEnv('VOICE_STT_CONCURRENCY_PER_SUBJECT', 1),
+    ttsConcurrencyPerSubject: intEnv('VOICE_TTS_CONCURRENCY_PER_SUBJECT', 2),
+  },
+  guestMint: {
+    perMinuteDevice: intEnv('GUEST_MINT_PER_MINUTE_DEVICE', 1),
+    perDayDevice: intEnv('GUEST_MINT_PER_DAY_DEVICE', 20),
+    perHourIp: intEnv('GUEST_MINT_PER_HOUR_IP', 30),
+  },
+  allowedOrigins: csvEnv('CORS_ALLOWED_ORIGINS', [
+    'https://xmianai.com',
+    'https://www.xmianai.com',
+  ]),
 };
+
+export function assertProductionConfig(): void {
+  if (config.nodeEnv !== 'production') return;
+
+  const failures: string[] = [];
+  if (jwtSecret === 'dev-only-jwt-secret-change-me' || jwtSecret.length < 32) {
+    failures.push('JWT_SECRET 必须是至少 32 位的生产密钥');
+  }
+  if (!config.siliconflowApiKey) {
+    failures.push('SILICONFLOW_API_KEY 未配置');
+  }
+  if (config.allowedOrigins.length === 0 || config.allowedOrigins.some((origin) => !origin.startsWith('https://'))) {
+    failures.push('CORS_ALLOWED_ORIGINS 必须仅包含 HTTPS 来源');
+  }
+  if (
+    config.quota.guestStt <= 0
+    || config.quota.guestTts <= 0
+    || config.quota.guestSttSeconds <= 0
+    || config.quota.guestTtsChars <= 0
+  ) {
+    failures.push('生产环境 guest 语音配额不得设为无限');
+  }
+
+  if (failures.length > 0) {
+    throw new Error(`生产配置不安全：${failures.join('；')}`);
+  }
+}

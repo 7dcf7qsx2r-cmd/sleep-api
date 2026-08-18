@@ -16,6 +16,15 @@ import { adminRoutes } from './routes/admin/index.js';
 import { expertRoutes } from './routes/experts.js';
 import { contentRoutes } from './routes/content.js';
 import { reportRoutes } from './routes/report.js';
+import { config } from './config.js';
+
+function isAllowedOrigin(origin: string): boolean {
+  if (config.allowedOrigins.includes(origin)) return true;
+  if (config.nodeEnv !== 'production') {
+    return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+  }
+  return false;
+}
 
 export function createApp() {
   const app = new Hono();
@@ -25,22 +34,10 @@ export function createApp() {
   app.use(
     '*',
     cors({
-      origin: (origin) => {
-        if (!origin) return '*';
-        if (
-          origin.startsWith('http://localhost:') ||
-          origin.startsWith('http://127.0.0.1:') ||
-          origin.startsWith('exp://')
-        ) {
-          return origin;
-        }
-        if (origin.includes('xmianai.com')) {
-          return origin;
-        }
-        return origin;
-      },
+      origin: (origin) => isAllowedOrigin(origin) ? origin : undefined,
       allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
       allowHeaders: ['Content-Type', 'Authorization'],
+      credentials: false,
     }),
   );
 
@@ -61,8 +58,12 @@ export function createApp() {
 
   app.notFound((c) => c.json({ error: 'not_found' }, 404));
   app.onError((err, c) => {
-    console.error(err);
-    return c.json({ error: 'internal_error', message: err.message }, 500);
+    console.error('[sleep-api] unhandled', {
+      name: err.name,
+      method: c.req.method,
+      path: c.req.path,
+    });
+    return c.json({ error: 'internal_error', message: '服务器暂时不可用' }, 500);
   });
 
   return app;

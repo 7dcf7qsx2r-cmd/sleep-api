@@ -16,6 +16,7 @@
     "smoke": "tsx scripts/smoke-p0.ts",
     "integration": "tsx scripts/integration-p0-p1.ts",
     "integration:p2": "tsx scripts/integration-p2.ts",
+    "verify:voice-profiles": "tsx scripts/verify-voice-profiles.ts",
     "dev:docker": "bash scripts/dev-docker.sh",
     "worker": "tsx scripts/worker.ts",
     "integration:p3": "tsx scripts/integration-p3.ts"
@@ -27,8 +28,10 @@
     "@sentry/node": "^9.15.0",
     "bcryptjs": "^3.0.2",
     "dotenv": "^16.5.0",
+    "file-type": "^22.0.1",
     "hono": "^4.7.10",
     "jose": "^6.0.11",
+    "music-metadata": "^11.14.0",
     "pg": "^8.16.0",
     "tencentcloud-sdk-nodejs-sms": "^4.1.240",
     "zod": "^3.25.28"

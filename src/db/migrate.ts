@@ -28,10 +28,50 @@ const MIGRATION_STATEMENTS = [
   usage_date DATE NOT NULL DEFAULT CURRENT_DATE,
   chat_count INT NOT NULL DEFAULT 0,
   interpret_count INT NOT NULL DEFAULT 0,
+  stt_count INT NOT NULL DEFAULT 0,
+  stt_seconds INT NOT NULL DEFAULT 0,
+  tts_count INT NOT NULL DEFAULT 0,
+  tts_chars INT NOT NULL DEFAULT 0,
   UNIQUE (subject_type, subject_id, usage_date)
 )`,
+  `ALTER TABLE ai_usage_daily ADD COLUMN IF NOT EXISTS stt_count INT NOT NULL DEFAULT 0`,
+  `ALTER TABLE ai_usage_daily ADD COLUMN IF NOT EXISTS stt_seconds INT NOT NULL DEFAULT 0`,
+  `ALTER TABLE ai_usage_daily ADD COLUMN IF NOT EXISTS tts_count INT NOT NULL DEFAULT 0`,
+  `ALTER TABLE ai_usage_daily ADD COLUMN IF NOT EXISTS tts_chars INT NOT NULL DEFAULT 0`,
   `CREATE INDEX IF NOT EXISTS idx_ai_usage_subject
   ON ai_usage_daily (subject_type, subject_id, usage_date)`,
+  `CREATE TABLE IF NOT EXISTS rate_limit_buckets (
+  key_hash TEXT NOT NULL,
+  action TEXT NOT NULL,
+  window_start TIMESTAMPTZ NOT NULL,
+  request_count INT NOT NULL DEFAULT 0,
+  expires_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (key_hash, action, window_start)
+)`,
+  `CREATE INDEX IF NOT EXISTS idx_rate_limit_buckets_expiry
+  ON rate_limit_buckets (expires_at)`,
+  `CREATE TABLE IF NOT EXISTS voice_usage_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  feature TEXT NOT NULL CHECK (feature IN ('stt', 'tts', 'guest_mint', 'client_playback')),
+  outcome TEXT NOT NULL,
+  subject_type TEXT,
+  subject_hash TEXT,
+  units INT NOT NULL DEFAULT 0,
+  latency_ms INT NOT NULL DEFAULT 0,
+  scene TEXT,
+  engine TEXT,
+  reason_code TEXT,
+  request_id TEXT,
+  provider_status INT,
+  provider_trace_id TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)`,
+  `ALTER TABLE voice_usage_events ADD COLUMN IF NOT EXISTS scene TEXT`,
+  `ALTER TABLE voice_usage_events ADD COLUMN IF NOT EXISTS engine TEXT`,
+  `ALTER TABLE voice_usage_events ADD COLUMN IF NOT EXISTS reason_code TEXT`,
+  `ALTER TABLE voice_usage_events ADD COLUMN IF NOT EXISTS request_id TEXT`,
+  `CREATE INDEX IF NOT EXISTS idx_voice_usage_events_feature_time
+  ON voice_usage_events (feature, created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_guest_device
   ON guest_sessions (device_id)`,
   `CREATE TABLE IF NOT EXISTS data_blobs (
@@ -55,6 +95,25 @@ const MIGRATION_STATEMENTS = [
 )`,
   `CREATE INDEX IF NOT EXISTS idx_sync_changelog_owner_time
   ON sync_changelog (owner_type, owner_id, created_at)`,
+  `UPDATE data_blobs
+   SET data = (data - 'voice' - 'chatSpeed' - 'bedtimeSpeed' - 'nativeRate' - 'nativePitch')
+     || jsonb_build_object(
+       'schemaVersion', 3,
+       'voiceStyleId', CASE
+         WHEN data->>'voiceStyleId' IN ('gentle_companion', 'moon_rational', 'morning_light', 'playful_cute')
+           THEN data->>'voiceStyleId'
+         ELSE 'gentle_companion'
+       END
+     ),
+     version = version + 1,
+     updated_at = NOW()
+   WHERE domain = 'voice_prefs'
+     AND (
+       data->>'schemaVersion' IS DISTINCT FROM '3'
+       OR data ? 'voice'
+       OR data ? 'chatSpeed'
+       OR data ? 'bedtimeSpeed'
+     )`,
   `CREATE TABLE IF NOT EXISTS energy_accounts (
   user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   balance INT NOT NULL DEFAULT 500,

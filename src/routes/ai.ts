@@ -1,16 +1,30 @@
 import { Hono } from 'hono';
+import { randomUUID } from 'node:crypto';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { requireAuth, type AuthVariables } from '../middleware/auth.js';
 import { callDeepSeek } from '../lib/deepseek.js';
 import { generateSiliconFlowImage } from '../lib/siliconflowImage.js';
-import { synthesizeSiliconFlowSpeech, fetchSiliconFlowSpeechStream } from '../lib/siliconflowTts.js';
-import { transcribeSiliconFlowAudio, sttFailureMessage } from '../lib/siliconflowStt.js';
-import { createTtsStreamSession, consumeTtsStreamSession } from '../lib/ttsStreamSession.js';
-import { checkAndIncrement, getQuotaSnapshot } from '../services/quota.js';
+import { synthesizeSiliconFlowSpeech } from '../lib/siliconflowTts.js';
+import { transcribeSiliconFlowAudio } from '../lib/siliconflowStt.js';
+import { checkAndConsume, checkAndIncrement, getQuotaSnapshot } from '../services/quota.js';
 import { ownerFromAuth } from '../lib/owner.js';
 import { loadSleepNights } from '../services/sleepNights.js';
 import { generateHomeDailyInsight } from '../services/homeInsight.js';
+import { config } from '../config.js';
+import { acquireConcurrency } from '../services/concurrency.js';
+import { SttInputError, validateSttAudio } from '../lib/sttInputValidation.js';
+import {
+  buildProfiledTtsRequest,
+  TTS_SCENES,
+  TTS_VOICE_STYLE_IDS,
+} from '../lib/ttsVoiceProfiles.js';
+import { recordVoiceEvent } from '../services/voiceMetrics.js';
+import { consumeFixedWindow } from '../services/rateLimit.js';
+import {
+  parseConsultTurnPayload,
+  validateConsultTurnPayload,
+} from '../lib/consultTurnCodec.js';
 
 const XIAOMIAN_SYSTEM_PROMPT = `你是「小眠」，一个温柔的睡眠陪伴AI。你的存在意义是在深夜陪伴那些失眠、焦虑、疲惫的灵魂。
 
@@ -155,36 +169,6 @@ const imagerySchema = z.array(
 );
 
 export const aiRoutes = new Hono<{ Variables: AuthVariables }>();
-
-/** 原生播放器无法带 Authorization，用一次性 session token 鉴权 */
-aiRoutes.get('/tts/stream/:sessionId', async (c) => {
-  const sessionId = c.req.param('sessionId');
-  const token = c.req.query('token') ?? '';
-  const payload = consumeTtsStreamSession(sessionId, token);
-  if (!payload) {
-    return c.json({ error: 'stream_session_invalid' }, 404);
-  }
-
-  const upstream = await fetchSiliconFlowSpeechStream(payload.input, {
-    speed: payload.speed,
-    voice: payload.voice,
-    gain: payload.gain,
-  });
-  if (!upstream?.body) {
-    return c.json({
-      error: 'tts_stream_failed',
-      message: '流式语音合成不可用',
-    }, 503);
-  }
-
-  return new Response(upstream.body, {
-    headers: {
-      'Content-Type': 'audio/mpeg',
-      'Cache-Control': 'no-store',
-      'Transfer-Encoding': 'chunked',
-    },
-  });
-});
 
 aiRoutes.use('*', requireAuth);
 
@@ -448,6 +432,79 @@ aiRoutes.post(
       text: result.text,
       isFallback: result.isFallback,
       latencyMs: result.latencyMs,
+    });
+  },
+);
+
+const CONSULT_JSON_RETRY = '【请严格按 JSON schema 输出，仅返回一个 JSON 对象，不要 markdown】';
+
+const consultPhaseSchema = z.enum(['triage', 'clarify', 'formulate', 'plan', 'safety']);
+
+aiRoutes.post(
+  '/consult-turn',
+  zValidator(
+    'json',
+    z.object({
+      message: z.string().min(1).max(4000),
+      history: historySchema.optional(),
+      systemPrompt: z.string().min(1).max(12000),
+      outputPhase: consultPhaseSchema,
+      fallbackSpeech: z.string().max(2000).default('专业分析已更新'),
+      temperature: z.number().min(0).max(1).optional(),
+      maxTokens: z.number().min(50).max(2400).optional(),
+    }),
+  ),
+  async (c) => {
+    const auth = c.get('auth');
+    const body = c.req.valid('json');
+
+    const quota = await checkAndIncrement(auth.type, auth.sub, 'chat');
+    if (!quota.allowed) {
+      return c.json({
+        error: 'quota_exceeded',
+        message: '今日对话次数已用完',
+        quota: quota.snapshot,
+      }, 429);
+    }
+
+    const llmBase = {
+      temperature: body.temperature ?? 0.35,
+      maxTokens: body.maxTokens ?? 1800,
+      timeoutMs: 90_000,
+      fallback: body.fallbackSpeech,
+    };
+
+    const history = (body.history ?? []).slice(-12);
+    const runOnce = (userContent: string) => callDeepSeek({
+      messages: [
+        { role: 'system', content: body.systemPrompt },
+        ...history,
+        { role: 'user', content: userContent },
+      ],
+      ...llmBase,
+    });
+
+    let result = await runOnce(body.message);
+    let payload = parseConsultTurnPayload(result.text);
+    let validated = Boolean(payload && validateConsultTurnPayload(payload, body.outputPhase));
+
+    if (!validated && !result.isFallback) {
+      const retry = await runOnce(`${body.message}\n\n${CONSULT_JSON_RETRY}`);
+      const retryPayload = parseConsultTurnPayload(retry.text);
+      if (retryPayload && validateConsultTurnPayload(retryPayload, body.outputPhase)) {
+        payload = retryPayload;
+        result = retry;
+        validated = true;
+      }
+    }
+
+    return c.json({
+      payload: validated ? payload : null,
+      text: result.text,
+      isFallback: result.isFallback,
+      validated,
+      latencyMs: result.latencyMs,
+      quota: quota.snapshot,
     });
   },
 );
@@ -1003,89 +1060,387 @@ aiRoutes.post(
 );
 
 aiRoutes.post(
-  '/tts/speech',
+  '/voice/events',
   zValidator(
     'json',
     z.object({
-      input: z.string().min(1).max(2000),
-      speed: z.number().min(0.5).max(2).optional(),
-      voice: z.string().max(200).optional(),
-      gain: z.number().min(-10).max(10).optional(),
+      outcome: z.enum([
+        'native_fallback',
+        'playback_success',
+        'playback_failed',
+        'playback_cancelled',
+      ]),
+      units: z.number().int().min(0).max(100_000).optional(),
+      latencyMs: z.number().int().min(0).max(10 * 60 * 1_000).optional(),
+      scene: z.enum(TTS_SCENES).optional(),
+      engine: z.enum(['neural', 'native', 'web_speech']).optional(),
+      reasonCode: z.string().trim().min(1).max(64).regex(/^[a-z0-9_]+$/).optional(),
+      requestId: z.string().trim().min(8).max(128).optional(),
     }),
   ),
   async (c) => {
-    const body = c.req.valid('json');
-    const synth = await synthesizeSiliconFlowSpeech(body.input, {
-      speed: body.speed,
-      voice: body.voice,
-      gain: body.gain,
+    const auth = c.get('auth');
+    const event = c.req.valid('json');
+    const rate = await consumeFixedWindow({
+      action: 'voice_client_event',
+      key: `${auth.type}:${auth.sub}`,
+      limit: auth.type === 'guest' ? 120 : 600,
+      windowMs: 60 * 60 * 1_000,
     });
-    if (!synth.bytes?.byteLength) {
-      return c.json({
-        error: 'tts_failed',
-        message: synth.reason ?? '语音合成不可用，请检查 SILICONFLOW_API_KEY',
-      }, 503);
-    }
-    return new Response(synth.bytes, {
-      headers: {
-        'Content-Type': 'audio/mpeg',
-        'Cache-Control': 'private, max-age=3600',
-      },
+    if (!rate.allowed) return c.body(null, 202);
+    await recordVoiceEvent({
+      feature: 'client_playback',
+      outcome: event.outcome,
+      subjectType: auth.type,
+      subjectId: auth.sub,
+      units: event.units,
+      latencyMs: event.latencyMs,
+      scene: event.scene,
+      engine: event.engine,
+      reasonCode: event.reasonCode,
+      requestId: event.requestId,
     });
+    return c.body(null, 202);
   },
 );
 
 aiRoutes.post(
-  '/tts/stream/session',
+  '/tts/speech',
   zValidator(
     'json',
     z.object({
-      input: z.string().min(1).max(2000),
-      speed: z.number().min(0.5).max(2).optional(),
-      voice: z.string().max(200).optional(),
-      gain: z.number().min(-10).max(10).optional(),
+      text: z.string().trim().min(1).max(config.voice.maxTtsChars),
+      voiceStyleId: z.enum(TTS_VOICE_STYLE_IDS),
+      scene: z.enum(TTS_SCENES),
     }),
+    async (result, c) => {
+      if (result.success) return;
+      await recordVoiceEvent({
+        feature: 'tts',
+        outcome: 'input_rejected',
+        reasonCode: 'invalid_voice_request',
+      });
+      return c.json({
+        error: 'invalid_voice_request',
+        message: '朗读参数无效',
+      }, 400);
+    },
   ),
   async (c) => {
+    const auth = c.get('auth');
     const body = c.req.valid('json');
-    const { sessionId, token } = createTtsStreamSession({
-      input: body.input,
-      speed: body.speed,
-      voice: body.voice,
-      gain: body.gain,
+    const startedAt = Date.now();
+    const requestId = c.req.header('x-request-id')?.slice(0, 128) || randomUUID();
+    c.header('X-Request-Id', requestId);
+    const lease = acquireConcurrency('tts', `${auth.type}:${auth.sub}`, {
+      global: config.voice.ttsConcurrency,
+      perSubject: config.voice.ttsConcurrencyPerSubject,
     });
-    return c.json({ sessionId, token });
+    if (!lease) {
+      await recordVoiceEvent({
+        feature: 'tts',
+        outcome: 'concurrency_rejected',
+        subjectType: auth.type,
+        subjectId: auth.sub,
+        units: body.text.length,
+        scene: body.scene,
+        engine: 'neural',
+        requestId,
+      });
+      return c.json({
+        error: 'voice_busy',
+        message: '语音服务正忙，请稍后再试',
+      }, 429);
+    }
+
+    try {
+      if (!canCallVoiceProvider('tts')) {
+        await recordVoiceEvent({
+          feature: 'tts',
+          outcome: 'circuit_open',
+          subjectType: auth.type,
+          subjectId: auth.sub,
+          units: body.text.length,
+          latencyMs: Date.now() - startedAt,
+          scene: body.scene,
+          engine: 'neural',
+          reasonCode: 'provider_circuit_open',
+          requestId,
+        });
+        return c.json({
+          error: 'voice_provider_unavailable',
+          message: '云端语音暂不可用',
+        }, 503);
+      }
+      const quota = await checkAndConsume(auth.type, auth.sub, 'tts', body.text.length);
+      if (!quota.allowed) {
+        await recordVoiceEvent({
+          feature: 'tts',
+          outcome: 'quota_exceeded',
+          subjectType: auth.type,
+          subjectId: auth.sub,
+          units: body.text.length,
+          scene: body.scene,
+          engine: 'neural',
+          requestId,
+        });
+        return c.json({
+          error: 'voice_quota_exceeded',
+          message: '今日语音合成额度已用完',
+          quota: quota.snapshot.tts,
+        }, 429);
+      }
+
+      const profiled = buildProfiledTtsRequest(body);
+      const synth = await synthesizeSiliconFlowSpeech(profiled.input, {
+        speed: profiled.speed,
+        voice: profiled.voice,
+        signal: c.req.raw.signal,
+      });
+      if (synth.code !== 'cancelled') {
+        recordVoiceProviderResult('tts', Boolean(synth.bytes?.byteLength));
+      }
+      if (!synth.bytes?.byteLength) {
+        await recordVoiceEvent({
+          feature: 'tts',
+          outcome: synth.code ?? 'provider_unavailable',
+          subjectType: auth.type,
+          subjectId: auth.sub,
+          units: body.text.length,
+          latencyMs: Date.now() - startedAt,
+          scene: body.scene,
+          engine: 'neural',
+          reasonCode: synth.code,
+          requestId,
+          providerStatus: synth.providerStatus,
+          providerTraceId: synth.providerTraceId,
+        });
+        if (synth.code === 'timeout') {
+          return c.json({ error: 'voice_timeout', message: '语音合成超时，请重试' }, 504);
+        }
+        if (synth.code === 'cancelled') {
+          return c.json({ error: 'request_cancelled', message: '语音合成已取消' }, 408);
+        }
+        if (synth.code === 'provider_quota') {
+          return c.json({ error: 'voice_provider_quota', message: '云端语音额度暂不可用' }, 503);
+        }
+        if (synth.code === 'provider_auth' || synth.code === 'not_configured') {
+          return c.json({ error: 'voice_provider_auth', message: '云端语音配置异常' }, 503);
+        }
+        return c.json({
+          error: 'voice_provider_unavailable',
+          message: '云端语音暂不可用',
+        }, 503);
+      }
+
+      await recordVoiceEvent({
+        feature: 'tts',
+        outcome: 'success',
+        subjectType: auth.type,
+        subjectId: auth.sub,
+        units: body.text.length,
+        latencyMs: Date.now() - startedAt,
+        scene: body.scene,
+        engine: 'neural',
+        requestId,
+        providerStatus: synth.providerStatus,
+        providerTraceId: synth.providerTraceId,
+      });
+      return new Response(synth.bytes, {
+        headers: {
+          'Content-Type': 'audio/mpeg',
+          'Cache-Control': 'private, max-age=3600',
+          'X-Request-Id': requestId,
+          'X-Voice-Style': body.voiceStyleId,
+          'X-Tts-Prompt-Version': profiled.promptVersion,
+        },
+      });
+    } finally {
+      lease.release();
+    }
   },
 );
 
 aiRoutes.post('/stt/transcribe', async (c) => {
+  const auth = c.get('auth');
+  const startedAt = Date.now();
+  const requestId = c.req.header('x-request-id')?.slice(0, 128) || randomUUID();
+  c.header('X-Request-Id', requestId);
+  const contentLength = Number(c.req.header('content-length') ?? 0);
+  if (contentLength > config.voice.maxSttBytes + 128 * 1024) {
+    await recordVoiceEvent({
+      feature: 'stt',
+      outcome: 'input_rejected',
+      subjectType: auth.type,
+      subjectId: auth.sub,
+      reasonCode: 'audio_too_large',
+      requestId,
+    });
+    return c.json({
+      error: 'audio_too_large',
+      message: '录音不能超过 2 MiB',
+    }, 413);
+  }
+
   let form: FormData;
   try {
     form = await c.req.formData();
   } catch {
-    return c.json({ error: 'no_file', message: '请上传音频文件' }, 400);
+    await recordVoiceEvent({
+      feature: 'stt',
+      outcome: 'input_rejected',
+      subjectType: auth.type,
+      subjectId: auth.sub,
+      reasonCode: 'audio_missing',
+      requestId,
+    });
+    return c.json({ error: 'audio_missing', message: '请上传音频文件' }, 400);
   }
   const file = form.get('file');
   if (!file || typeof file === 'string') {
-    return c.json({ error: 'no_file', message: '请上传音频文件' }, 400);
+    await recordVoiceEvent({
+      feature: 'stt',
+      outcome: 'input_rejected',
+      subjectType: auth.type,
+      subjectId: auth.sub,
+      reasonCode: 'audio_missing',
+      requestId,
+    });
+    return c.json({ error: 'audio_missing', message: '请上传音频文件' }, 400);
   }
 
-  const bytes = await file.arrayBuffer();
-  if (!bytes.byteLength) {
-    return c.json({ error: 'empty_file', message: '音频为空' }, 400);
+  let validated: Awaited<ReturnType<typeof validateSttAudio>>;
+  try {
+    validated = await validateSttAudio(file);
+  } catch (error) {
+    if (!(error instanceof SttInputError)) throw error;
+    const message = error.code === 'audio_too_large'
+      ? '录音不能超过 2 MiB'
+      : error.code === 'audio_too_long'
+        ? '单次录音不能超过 60 秒'
+        : error.code === 'audio_type_unsupported'
+          ? '不支持这种音频格式'
+          : '录音文件无效';
+    await recordVoiceEvent({
+      feature: 'stt',
+      outcome: 'input_rejected',
+      subjectType: auth.type,
+      subjectId: auth.sub,
+      reasonCode: error.code,
+      requestId,
+    });
+    return c.json({ error: error.code, message }, error.status);
   }
 
-  const stt = await transcribeSiliconFlowAudio(
-    bytes,
-    file.name || 'voice.m4a',
-    file.type || 'audio/mp4',
-  );
-  if (!stt.text) {
-    return c.json({
-      error: 'stt_failed',
-      message: sttFailureMessage(stt),
-    }, 503);
+  const lease = acquireConcurrency('stt', `${auth.type}:${auth.sub}`, {
+    global: config.voice.sttConcurrency,
+    perSubject: config.voice.sttConcurrencyPerSubject,
+  });
+  if (!lease) {
+    await recordVoiceEvent({
+      feature: 'stt',
+      outcome: 'concurrency_rejected',
+      subjectType: auth.type,
+      subjectId: auth.sub,
+      units: validated.durationSec,
+      engine: 'neural',
+      requestId,
+    });
+    return c.json({ error: 'voice_busy', message: '语音服务正忙，请稍后再试' }, 429);
   }
 
-  return c.json({ text: stt.text });
+  try {
+    if (!canCallVoiceProvider('stt')) {
+      await recordVoiceEvent({
+        feature: 'stt',
+        outcome: 'circuit_open',
+        subjectType: auth.type,
+        subjectId: auth.sub,
+        units: validated.durationSec,
+        latencyMs: Date.now() - startedAt,
+        engine: 'neural',
+        reasonCode: 'provider_circuit_open',
+        requestId,
+      });
+      return c.json({
+        error: 'voice_provider_unavailable',
+        message: '云端语音暂不可用',
+      }, 503);
+    }
+    const quota = await checkAndConsume(auth.type, auth.sub, 'stt', validated.durationSec);
+    if (!quota.allowed) {
+      await recordVoiceEvent({
+        feature: 'stt',
+        outcome: 'quota_exceeded',
+        subjectType: auth.type,
+        subjectId: auth.sub,
+        units: validated.durationSec,
+        engine: 'neural',
+        requestId,
+      });
+      return c.json({
+        error: 'voice_quota_exceeded',
+        message: '今日语音识别额度已用完',
+        quota: quota.snapshot.stt,
+      }, 429);
+    }
+
+    const audio = validated.bytes.buffer.slice(
+      validated.bytes.byteOffset,
+      validated.bytes.byteOffset + validated.bytes.byteLength,
+    ) as ArrayBuffer;
+    const stt = await transcribeSiliconFlowAudio(
+      audio,
+      file.name || 'voice.m4a',
+      validated.mime,
+      c.req.raw.signal,
+    );
+    if (stt.code !== 'cancelled') {
+      recordVoiceProviderResult('stt', Boolean(stt.text));
+    }
+    if (!stt.text) {
+      await recordVoiceEvent({
+        feature: 'stt',
+        outcome: stt.code ?? 'provider_unavailable',
+        subjectType: auth.type,
+        subjectId: auth.sub,
+        units: validated.durationSec,
+        latencyMs: Date.now() - startedAt,
+        engine: 'neural',
+        reasonCode: stt.code,
+        requestId,
+        providerStatus: stt.providerStatus,
+        providerTraceId: stt.providerTraceId,
+      });
+      if (stt.code === 'timeout') {
+        return c.json({ error: 'voice_timeout', message: '语音识别超时，请重试' }, 504);
+      }
+      if (stt.code === 'cancelled') {
+        return c.json({ error: 'request_cancelled', message: '语音识别已取消' }, 408);
+      }
+      if (stt.code === 'provider_quota') {
+        return c.json({ error: 'voice_provider_quota', message: '云端语音额度暂不可用' }, 503);
+      }
+      if (stt.code === 'provider_auth' || stt.code === 'not_configured') {
+        return c.json({ error: 'voice_provider_auth', message: '云端语音配置异常' }, 503);
+      }
+      return c.json({ error: 'voice_provider_unavailable', message: '云端语音暂不可用' }, 503);
+    }
+
+    await recordVoiceEvent({
+      feature: 'stt',
+      outcome: 'success',
+      subjectType: auth.type,
+      subjectId: auth.sub,
+      units: validated.durationSec,
+      latencyMs: Date.now() - startedAt,
+      engine: 'neural',
+      requestId,
+      providerStatus: stt.providerStatus,
+      providerTraceId: stt.providerTraceId,
+    });
+    return c.json({ text: stt.text });
+  } finally {
+    lease.release();
+  }
 });

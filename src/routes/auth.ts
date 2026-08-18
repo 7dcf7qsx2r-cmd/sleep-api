@@ -16,6 +16,9 @@ import {
   isWeChatMpConfigured,
 } from '../services/wechat.js';
 import { requireAuth, type AuthVariables } from '../middleware/auth.js';
+import { config } from '../config.js';
+import { consumeFixedWindow } from '../services/rateLimit.js';
+import { recordVoiceEvent } from '../services/voiceMetrics.js';
 
 export const authRoutes = new Hono<{ Variables: AuthVariables }>();
 
@@ -35,7 +38,40 @@ authRoutes.post(
   ),
   async (c) => {
     const { deviceId } = c.req.valid('json');
+    const ip = clientIp(c) ?? 'unknown';
+    const deviceKey = deviceId?.trim() || `legacy:${c.req.header('user-agent') ?? 'unknown'}`;
+    const checks = await Promise.all([
+      consumeFixedWindow({
+        action: 'guest_mint_device_minute',
+        key: deviceKey,
+        limit: config.guestMint.perMinuteDevice,
+        windowMs: 60_000,
+      }),
+      consumeFixedWindow({
+        action: 'guest_mint_device_day',
+        key: deviceKey,
+        limit: config.guestMint.perDayDevice,
+        windowMs: 24 * 60 * 60_000,
+      }),
+      consumeFixedWindow({
+        action: 'guest_mint_ip_hour',
+        key: ip,
+        limit: config.guestMint.perHourIp,
+        windowMs: 60 * 60_000,
+      }),
+    ]);
+    const rejected = checks.find((check) => !check.allowed);
+    if (rejected) {
+      c.header('Retry-After', String(rejected.retryAfterSec));
+      await recordVoiceEvent({ feature: 'guest_mint', outcome: 'rate_limited' });
+      return c.json({
+        error: 'guest_rate_limited',
+        message: '请求过于频繁，请稍后再试',
+      }, 429);
+    }
+
     const session = await createGuestSession(deviceId);
+    await recordVoiceEvent({ feature: 'guest_mint', outcome: 'success' });
     return c.json({
       token: session.token,
       guestId: session.guestId,

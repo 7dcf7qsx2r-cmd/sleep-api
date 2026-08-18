@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { config } from '../config.js';
 import { query } from '../db/client.js';
+import { getVoiceProviderStatus } from '../services/providerCircuit.js';
+import { getConcurrencySnapshot } from '../services/concurrency.js';
 
 export const healthRoutes = new Hono();
 
@@ -17,7 +19,7 @@ healthRoutes.get('/', (c) =>
       shop: '/shop/products · /shop/purchase',
       radar: '/api/radar/datapost · /api/radar/latest · /api/radar/report',
     },
-    app: '请在浏览器打开 http://localhost:8081 使用小眠 App',
+    app: '请使用小眠 App 或官网 Web 版本',
   }),
 );
 
@@ -41,5 +43,21 @@ healthRoutes.get('/health', async (c) => {
     ),
     wechatConfigured: Boolean(config.wechat.appId && config.wechat.appSecret),
     wechatMpConfigured: Boolean(config.wechatMp.appId && config.wechatMp.appSecret),
+  });
+});
+
+/** 只读取本地配置与熔断状态，不向供应商发起计费请求。 */
+healthRoutes.get('/health/providers', (c) => {
+  const voice = getVoiceProviderStatus();
+  c.header('Cache-Control', 'no-store');
+  return c.json({
+    status: voice.stt.status === 'available' && voice.tts.status === 'available'
+      ? 'ok'
+      : 'degraded',
+    voice,
+    concurrency: getConcurrencySnapshot(),
+    source: 'local_config_and_circuit_state',
+    billingRequests: 0,
+    checkedAt: new Date().toISOString(),
   });
 });
