@@ -1,0 +1,38 @@
+src/db/migrate.ts
+  4c5b675c683fbb53 522-550
+src/db/client.ts
+  4c5b675c683fbb53 39-67
+src/routes/social.ts
+  4c5b675c683fbb53 36-37,39,43-44,277,293-305
+src/services/social.ts
+  4c5b675c683fbb53 2-16,216-227
+src/services/energyLedger.ts
+  4c5b675c683fbb53 359,386-391,406,409,568,571
+src/services/garden.ts
+  4c5b675c683fbb53 6
+tests/sleep-squad.test.ts
+  4c5b675c683fbb53 1-212
+src/services/sleepSquad.ts
+  4c5b675c683fbb53 1-642
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.3",
+  "base_commit_sha": "af94d2044ee0aeadd431e7bdf5c43d1aa7b20793",
+  "prompts": {
+    "4c5b675c683fbb53": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9b8d194a-3b07-4f5a-b48c-7554b28d133f",
+        "model": "grok-4.6"
+      },
+      "human_author": "pengjun5437513 <cunminjia@qq.com>",
+      "messages": [],
+      "total_additions": 970,
+      "total_deletions": 221,
+      "accepted_lines": 970,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/7ba8052ebb7f0cc1b995cf7aaff73002c0a9de3342dc9545456887c5043ba898"
+    }
+  }
+}
