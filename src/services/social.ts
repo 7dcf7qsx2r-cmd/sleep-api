@@ -1,6 +1,6 @@
 import { query } from '../db/client.js';
 import { tipFeedPost } from './energyLedger.js';
-import { recordSleepSquadContributionFromPost } from './sleepSquad.js';
+import { recordSleepSquadContributionFromPost, weekKey } from './sleepSquad.js';
 
 export {
   SleepSquadError,
@@ -12,6 +12,7 @@ export {
   leaveCurrentSleepSquad,
   recordSleepSquadCheckIn,
   recordSleepSquadContributionFromPost,
+  weekKey,
 } from './sleepSquad.js';
 export type { PendingSquadClaim, SleepSquadDto, SleepSquadState, SquadLeaderEntry } from './sleepSquad.js';
 
@@ -255,29 +256,50 @@ export function decodeFeedCursor(cursor: string): FeedCursor | { created_at: str
 }
 
 export async function listFeed(cursor?: string, limit = 20, viewerId?: string) {
+  if (!viewerId) return [];
+
   const params: (string | number)[] = [limit];
-  let whereClause = '';
+  const filters: string[] = [];
 
   if (cursor) {
     const decoded = decodeFeedCursor(cursor);
     if (decoded?.id) {
-      whereClause = `WHERE (f.created_at, f.id) < ($2::timestamptz, $3::uuid)`;
+      filters.push(`(f.created_at, f.id) < ($2::timestamptz, $3::uuid)`);
       params.push(decoded.created_at, decoded.id);
     } else if (decoded) {
       // Backward compatibility for the previous plain created_at cursor.
-      whereClause = `WHERE f.created_at < $2::timestamptz`;
+      filters.push(`f.created_at < $2::timestamptz`);
       params.push(decoded.created_at);
     }
   }
 
-  const likedClause = viewerId
-    ? `EXISTS (SELECT 1 FROM feed_likes l WHERE l.post_id = f.id AND l.user_id = $${params.length + 1}) as liked_by_me`
-    : `FALSE as liked_by_me`;
-  const followedClause = viewerId
-    ? `EXISTS (SELECT 1 FROM user_follows uf WHERE uf.followed_id = f.user_id AND uf.follower_id = $${params.length + 1}) as followed_by_me`
-    : `FALSE as followed_by_me`;
+  const viewerIdx = params.length + 1;
+  const weekIdx = params.length + 2;
+  params.push(viewerId, weekKey());
 
-  const allParams = viewerId ? [...params, viewerId] : params;
+  filters.push(`(
+    f.user_id = $${viewerIdx}
+    OR EXISTS (
+      SELECT 1 FROM user_follows uf
+      WHERE uf.follower_id = $${viewerIdx} AND uf.followed_id = f.user_id
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM sleep_squad_members me
+      JOIN sleep_squads s
+        ON s.id = me.squad_id AND s.week_key = $${weekIdx}::date
+      JOIN sleep_squad_members mate
+        ON mate.squad_id = me.squad_id AND mate.left_at IS NULL
+      WHERE me.user_id = $${viewerIdx}
+        AND me.left_at IS NULL
+        AND mate.user_id = f.user_id
+    )
+  )`);
+
+  const likedClause =
+    `EXISTS (SELECT 1 FROM feed_likes l WHERE l.post_id = f.id AND l.user_id = $${viewerIdx}) as liked_by_me`;
+  const followedClause =
+    `EXISTS (SELECT 1 FROM user_follows uf WHERE uf.followed_id = f.user_id AND uf.follower_id = $${viewerIdx}) as followed_by_me`;
 
   const result = await query(
     `SELECT f.*,
@@ -296,10 +318,10 @@ export async function listFeed(cursor?: string, limit = 20, viewerId?: string) {
        ON profile_blob.owner_type = 'user' AND profile_blob.owner_id = f.user_id AND profile_blob.domain = 'profile'
      LEFT JOIN data_blobs persona_blob
        ON persona_blob.owner_type = 'user' AND persona_blob.owner_id = f.user_id AND persona_blob.domain = 'persona'
-     ${whereClause}
+     WHERE ${filters.join(' AND ')}
      ORDER BY f.created_at DESC, f.id DESC
      LIMIT $1`,
-    allParams,
+    params,
   );
   return result.rows;
 }

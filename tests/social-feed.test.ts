@@ -14,8 +14,14 @@ let social: typeof import('../src/services/social.js');
 
 const VIEWER = '00000000-0000-4000-8000-000000000001';
 const AUTHOR = '00000000-0000-4000-8000-000000000002';
+const STRANGER = '00000000-0000-4000-8000-000000000003';
+const MATE = '00000000-0000-4000-8000-000000000004';
 const POST_A = '10000000-0000-4000-8000-000000000001';
 const POST_B = '10000000-0000-4000-8000-000000000002';
+const POST_STRANGER = '10000000-0000-4000-8000-000000000003';
+const POST_OWN = '10000000-0000-4000-8000-000000000004';
+const POST_MATE = '10000000-0000-4000-8000-000000000005';
+const SQUAD_ID = '20000000-0000-4000-8000-000000000001';
 
 before(async () => {
   ({ closeDb, query } = await import('../src/db/client.js'));
@@ -61,12 +67,22 @@ before(async () => {
       reporter_id UUID NOT NULL REFERENCES users(id), reason TEXT NOT NULL, details TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE (post_id, reporter_id)
     )`,
+    `CREATE TABLE sleep_squads (
+      id UUID PRIMARY KEY, sleep_type TEXT NOT NULL DEFAULT '浅睡易醒型', week_key DATE NOT NULL
+    )`,
+    `CREATE TABLE sleep_squad_members (
+      squad_id UUID NOT NULL REFERENCES sleep_squads(id),
+      user_id UUID NOT NULL REFERENCES users(id),
+      joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      left_at TIMESTAMPTZ,
+      PRIMARY KEY (squad_id, user_id)
+    )`,
   ];
   for (const statement of statements) await query(statement);
 
   await query(
-    `INSERT INTO users (id, username) VALUES ($1, 'viewer'), ($2, 'author')`,
-    [VIEWER, AUTHOR],
+    `INSERT INTO users (id, username) VALUES ($1, 'viewer'), ($2, 'author'), ($3, 'stranger'), ($4, 'mate')`,
+    [VIEWER, AUTHOR, STRANGER, MATE],
   );
   await query(
     `INSERT INTO user_profiles (user_id, nickname, avatar_url)
@@ -81,9 +97,25 @@ before(async () => {
   await query(
     `INSERT INTO feed_posts (id, user_id, type, content_json, created_at)
      VALUES
-       ($1, $3, 'milestone', '{}', '2026-07-23T01:00:00Z'),
-       ($2, $3, 'milestone', '{}', '2026-07-23T01:00:00Z')`,
-    [POST_A, POST_B, AUTHOR],
+       ($1, $5, 'milestone', '{}', '2026-07-23T01:00:00Z'),
+       ($2, $5, 'milestone', '{}', '2026-07-23T01:00:00Z'),
+       ($3, $6, 'milestone', '{}', '2026-07-23T02:00:00Z'),
+       ($4, $7, 'milestone', '{}', '2026-07-22T09:00:00Z')`,
+    [POST_A, POST_B, POST_STRANGER, POST_OWN, AUTHOR, STRANGER, VIEWER],
+  );
+  await query(
+    `INSERT INTO sleep_squads (id, week_key) VALUES ($1, $2::date)`,
+    [SQUAD_ID, social.weekKey()],
+  );
+  await query(
+    `INSERT INTO sleep_squad_members (squad_id, user_id)
+     VALUES ($1, $2), ($1, $3)`,
+    [SQUAD_ID, VIEWER, MATE],
+  );
+  await query(
+    `INSERT INTO feed_posts (id, user_id, type, content_json, created_at)
+     VALUES ($1, $2, 'milestone', '{}', '2026-07-22T08:00:00Z')`,
+    [POST_MATE, MATE],
   );
 });
 
@@ -127,6 +159,37 @@ test('feed uses id tie-break and returns social aggregates', async () => {
   const cursor = social.encodeFeedCursor(first[0] as { created_at: Date; id: string });
   const second = await social.listFeed(cursor, 1, VIEWER);
   assert.equal(second[0]?.id, POST_A);
+});
+
+test('feed only includes self, followed users, and current-week squad mates', async () => {
+  const ids = (await social.listFeed(undefined, 20, VIEWER)).map((row: { id: string }) => row.id);
+  assert.equal(ids.includes(POST_STRANGER), false);
+  assert.equal(ids.includes(POST_OWN), true);
+  assert.equal(ids.includes(POST_MATE), true);
+  assert.equal(ids.includes(POST_A), true);
+  assert.equal(ids.includes(POST_B), true);
+
+  await social.toggleFollow(VIEWER, AUTHOR);
+  const unfollowed = (await social.listFeed(undefined, 20, VIEWER)).map((row: { id: string }) => row.id);
+  assert.equal(unfollowed.includes(POST_A), false);
+  assert.equal(unfollowed.includes(POST_B), false);
+  assert.equal(unfollowed.includes(POST_OWN), true);
+  assert.equal(unfollowed.includes(POST_MATE), true);
+  await social.toggleFollow(VIEWER, AUTHOR);
+
+  await query(
+    `UPDATE sleep_squad_members SET left_at = NOW() WHERE squad_id = $1 AND user_id = $2`,
+    [SQUAD_ID, VIEWER],
+  );
+  const afterLeave = (await social.listFeed(undefined, 20, VIEWER)).map((row: { id: string }) => row.id);
+  assert.equal(afterLeave.includes(POST_MATE), false);
+  assert.equal(afterLeave.includes(POST_OWN), true);
+  await query(
+    `UPDATE sleep_squad_members SET left_at = NULL WHERE squad_id = $1 AND user_id = $2`,
+    [SQUAD_ID, VIEWER],
+  );
+
+  assert.deepEqual(await social.listFeed(undefined, 20), []);
 });
 
 test('follow toggles and reports are duplicate-safe', async () => {
