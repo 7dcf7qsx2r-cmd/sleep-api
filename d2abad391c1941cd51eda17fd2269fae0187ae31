@@ -1,0 +1,26 @@
+src/services/social.ts
+  4c5b675c683fbb53 3,15,259-260,262,267,271,276-302,321,324
+tests/social-feed.test.ts
+  4c5b675c683fbb53 17-18,21-24,70-79,84-85,100-118,164-194
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.3",
+  "base_commit_sha": "d2abad391c1941cd51eda17fd2269fae0187ae31",
+  "prompts": {
+    "4c5b675c683fbb53": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9b8d194a-3b07-4f5a-b48c-7554b28d133f",
+        "model": "grok-4.6"
+      },
+      "human_author": "pengjun5437513 <cunminjia@qq.com>",
+      "messages": [],
+      "total_additions": 103,
+      "total_deletions": 18,
+      "accepted_lines": 103,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/f3ab688132b8a88d5732db5ca5e097f0558951268588647fa1908e6377c7b403"
+    }
+  }
+}
