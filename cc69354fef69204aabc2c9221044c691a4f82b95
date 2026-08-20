@@ -1,0 +1,38 @@
+tests/social-feed.test.ts
+  4c5b675c683fbb53 154-155,198-207
+src/routes/social.ts
+  4c5b675c683fbb53 635-640
+tests/civil-date.test.ts
+  4c5b675c683fbb53 1-23
+src/services/social.ts
+  4c5b675c683fbb53 313-315,397-419,421-425,427-431
+src/routes/energy.ts
+  4c5b675c683fbb53 115
+src/services/energy.ts
+  4c5b675c683fbb53 2,18-19,47,50-51,71-80,95-96,126
+src/utils/civilDate.ts
+  4c5b675c683fbb53 1-31
+src/services/energyLedger.ts
+  4c5b675c683fbb53 8,42,101,114,497,502-503,506,508,562-577,586-589,591-592
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.3",
+  "base_commit_sha": "cc69354fef69204aabc2c9221044c691a4f82b95",
+  "prompts": {
+    "4c5b675c683fbb53": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9b8d194a-3b07-4f5a-b48c-7554b28d133f",
+        "model": "grok-4.6"
+      },
+      "human_author": "pengjun5437513 <cunminjia@qq.com>",
+      "messages": [],
+      "total_additions": 169,
+      "total_deletions": 44,
+      "accepted_lines": 159,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/49da0166ee09e8f7e8339dc3e17a79ddb64af1cc6ec2c1e807f7d306c05f7448"
+    }
+  }
+}
