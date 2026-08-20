@@ -1,4 +1,5 @@
 import { query } from '../db/client.js';
+import { SHANGHAI_TODAY_SQL, toDateOnly } from '../utils/civilDate.js';
 
 export interface EnergyAccountDto {
   balance: number;
@@ -14,8 +15,8 @@ export interface EnergyAccountDto {
 }
 
 const DEFAULT_ACCOUNT = {
-  balance: 500,
-  totalEarned: 500,
+  balance: 0,
+  totalEarned: 0,
   totalSpent: 0,
   streakDays: 0,
   maxStreakDays: 0,
@@ -43,10 +44,11 @@ export async function ensureEnergyAccount(userId: string): Promise<EnergyAccount
     `INSERT INTO energy_accounts (
       user_id, balance, total_earned, total_spent, streak_days, max_streak_days,
       daily_earned, daily_cap, daily_earned_date, version
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_DATE, 1)
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, ${SHANGHAI_TODAY_SQL}, 1)
     ON CONFLICT (user_id) DO NOTHING
     RETURNING balance, total_earned, total_spent, streak_days, max_streak_days,
-              daily_earned, daily_cap, daily_earned_date, last_check_in, version, updated_at`,
+              daily_earned, daily_cap, daily_earned_date::text AS daily_earned_date,
+              last_check_in::text AS last_check_in, version, updated_at`,
     [
       userId,
       DEFAULT_ACCOUNT.balance,
@@ -66,6 +68,16 @@ export async function ensureEnergyAccount(userId: string): Promise<EnergyAccount
 }
 
 export async function getEnergyAccount(userId: string): Promise<EnergyAccountDto | null> {
+  await query(
+    `UPDATE energy_accounts
+     SET daily_earned = 0,
+         daily_earned_date = ${SHANGHAI_TODAY_SQL},
+         version = version + 1,
+         updated_at = NOW()
+     WHERE user_id = $1
+       AND (daily_earned_date IS NULL OR daily_earned_date <> ${SHANGHAI_TODAY_SQL})`,
+    [userId],
+  );
   const row = await query<{
     balance: number;
     total_earned: number;
@@ -80,7 +92,8 @@ export async function getEnergyAccount(userId: string): Promise<EnergyAccountDto
     updated_at: Date;
   }>(
     `SELECT balance, total_earned, total_spent, streak_days, max_streak_days,
-            daily_earned, daily_cap, daily_earned_date, last_check_in, version, updated_at
+            daily_earned, daily_cap, daily_earned_date::text AS daily_earned_date,
+            last_check_in::text AS last_check_in, version, updated_at
      FROM energy_accounts WHERE user_id = $1`,
     [userId],
   );
@@ -110,7 +123,7 @@ function mapRow(r: {
     maxStreakDays: r.max_streak_days,
     dailyEarned: r.daily_earned,
     dailyCap: r.daily_cap,
-    lastCheckIn: r.last_check_in,
+    lastCheckIn: toDateOnly(r.last_check_in),
     version: r.version,
     updatedAt: r.updated_at.toISOString(),
   };

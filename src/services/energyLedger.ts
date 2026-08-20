@@ -5,6 +5,7 @@ import {
   getEnergyAccount,
   type EnergyAccountDto,
 } from './energy.js';
+import { shanghaiToday, shanghaiYesterday, toDateOnly } from '../utils/civilDate.js';
 
 export interface EnergyTransactionDto {
   id: string;
@@ -38,7 +39,7 @@ function streakBonus(streakDays: number): number {
 }
 
 function todayStr(): string {
-  return new Date().toISOString().split('T')[0]!;
+  return shanghaiToday();
 }
 
 async function withClient<T>(fn: (client: import('pg').PoolClient) => Promise<T>): Promise<T> {
@@ -97,7 +98,7 @@ async function getEnergyAccountWithClient(
     updated_at: Date;
   }>(
     `SELECT balance, total_earned, total_spent, streak_days, max_streak_days,
-            daily_earned, daily_cap, last_check_in, version, updated_at
+            daily_earned, daily_cap, last_check_in::text AS last_check_in, version, updated_at
      FROM energy_accounts WHERE user_id = $1`,
     [userId],
   );
@@ -110,7 +111,7 @@ async function getEnergyAccountWithClient(
     maxStreakDays: r.max_streak_days,
     dailyEarned: r.daily_earned,
     dailyCap: r.daily_cap,
-    lastCheckIn: r.last_check_in,
+    lastCheckIn: toDateOnly(r.last_check_in),
     version: r.version,
     updatedAt: r.updated_at.toISOString(),
   };
@@ -493,19 +494,18 @@ export async function checkIn(userId: string): Promise<{
       max_streak_days: number;
       last_check_in: string | null;
     }>(
-      `SELECT streak_days, max_streak_days, last_check_in FROM energy_accounts
+      `SELECT streak_days, max_streak_days, last_check_in::text AS last_check_in FROM energy_accounts
        WHERE user_id = $1 FOR UPDATE`,
       [userId],
     );
     const row = acc.rows[0]!;
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().split('T')[0]!;
+    const yesterdayStr = shanghaiYesterday();
+    const lastCheckIn = toDateOnly(row.last_check_in);
 
     let streakDays = row.streak_days;
-    if (row.last_check_in === yesterdayStr) {
+    if (lastCheckIn === yesterdayStr) {
       streakDays += 1;
-    } else if (row.last_check_in !== today) {
+    } else if (lastCheckIn !== today) {
       streakDays = 1;
     }
     const maxStreak = Math.max(row.max_streak_days, streakDays);
@@ -559,6 +559,22 @@ export async function checkIn(userId: string): Promise<{
   });
 }
 
+export const ENERGY_CLAIM_TYPES = new Set([
+  'sleep_reward',
+  'sleep_monitor',
+  'achievement',
+  'evidence_chain',
+  'week_challenge',
+  'night_school_graduation',
+  'night_school_step',
+  'dream_garden_harvest',
+  'dream_garden_visit',
+  'chapter7_night_act',
+  'standin_reveal',
+  'dream_pressure_smash',
+  'squad_share_v2',
+]);
+
 export async function claimReward(
   userId: string,
   claimType: string,
@@ -567,7 +583,12 @@ export async function claimReward(
   description: string,
   options?: { ignoreDailyCap?: boolean },
 ): Promise<{ earned: number; account: EnergyAccountDto }> {
+  if (!ENERGY_CLAIM_TYPES.has(claimType)) {
+    const account = await ensureEnergyAccount(userId);
+    return { earned: 0, account };
+  }
   const fullSourceId = `claim:${claimType}:${sourceId}`;
-  const result = await earnEnergy(userId, amount, description, fullSourceId, options);
+  const ignoreDailyCap = options?.ignoreDailyCap ?? claimType === 'achievement';
+  const result = await earnEnergy(userId, amount, description, fullSourceId, { ignoreDailyCap });
   return { earned: result.earned, account: result.account };
 }

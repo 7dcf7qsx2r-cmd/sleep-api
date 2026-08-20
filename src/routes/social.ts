@@ -632,7 +632,12 @@ socialRoutes.post(
     try {
       const result = await toggleFollow(auth.sub, c.req.valid('param').id);
       if (!result) return c.json({ error: 'user_not_found' }, 404);
-      return c.json({ ok: true, followed: result.followed });
+      return c.json({
+        ok: true,
+        followed: result.followed,
+        followers: result.followers,
+        following: result.following,
+      });
     } catch (error) {
       if (error instanceof Error && error.message === 'cannot_follow_self') {
         return c.json({ error: 'cannot_follow_self' }, 400);

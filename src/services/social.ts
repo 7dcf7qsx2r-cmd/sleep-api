@@ -310,7 +310,9 @@ export async function listFeed(cursor?: string, limit = 20, viewerId?: string) {
        ${likedClause},
        ${followedClause},
        (SELECT COUNT(*)::int FROM feed_comments c WHERE c.post_id = f.id) as comment_count,
-       (SELECT COALESCE(SUM(t.amount), 0)::int FROM feed_tips t WHERE t.post_id = f.id) as tip_amount
+       (SELECT COALESCE(SUM(t.amount), 0)::int FROM feed_tips t WHERE t.post_id = f.id) as tip_amount,
+       (SELECT COUNT(*)::int FROM user_follows uf WHERE uf.followed_id = f.user_id) as follower_count,
+       (SELECT COUNT(*)::int FROM user_follows uf WHERE uf.follower_id = f.user_id) as following_count
      FROM feed_posts f
      JOIN users u ON u.id = f.user_id
      LEFT JOIN user_profiles up ON up.user_id = f.user_id
@@ -392,22 +394,41 @@ export async function toggleFollow(followerId: string, followedId: string) {
      RETURNING followed_id`,
     [followerId, followedId],
   );
-  if (removed.rows[0]) return { followed: false };
+  let followed = false;
+  if (removed.rows[0]) {
+    followed = false;
+  } else {
+    const inserted = await query(
+      `INSERT INTO user_follows (follower_id, followed_id)
+       SELECT $1, $2
+       WHERE EXISTS (SELECT 1 FROM users WHERE id = $2 AND deleted_at IS NULL)
+       ON CONFLICT DO NOTHING
+       RETURNING followed_id`,
+      [followerId, followedId],
+    );
+    if (inserted.rows[0]) {
+      followed = true;
+    } else {
+      const existing = await query(
+        `SELECT 1 FROM user_follows WHERE follower_id = $1 AND followed_id = $2`,
+        [followerId, followedId],
+      );
+      if (!existing.rows[0]) return null;
+      followed = true;
+    }
+  }
 
-  const inserted = await query(
-    `INSERT INTO user_follows (follower_id, followed_id)
-     SELECT $1, $2
-     WHERE EXISTS (SELECT 1 FROM users WHERE id = $2 AND deleted_at IS NULL)
-     ON CONFLICT DO NOTHING
-     RETURNING followed_id`,
-    [followerId, followedId],
+  const counts = await query(
+    `SELECT
+       (SELECT COUNT(*)::int FROM user_follows WHERE followed_id = $1) AS followers,
+       (SELECT COUNT(*)::int FROM user_follows WHERE follower_id = $1) AS following`,
+    [followedId],
   );
-  if (inserted.rows[0]) return { followed: true };
-  const existing = await query(
-    `SELECT 1 FROM user_follows WHERE follower_id = $1 AND followed_id = $2`,
-    [followerId, followedId],
-  );
-  return existing.rows[0] ? { followed: true } : null;
+  return {
+    followed,
+    followers: Number(counts.rows[0]?.followers ?? 0),
+    following: Number(counts.rows[0]?.following ?? 0),
+  };
 }
 
 export async function tipPost(input: {

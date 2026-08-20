@@ -112,7 +112,7 @@ energyRoutes.post(
     z.object({
       claimType: z.string().max(64),
       sourceId: z.string().max(128),
-      amount: z.number().int().positive().max(500),
+      amount: z.number().int().positive().max(2000),
       description: z.string().max(200),
     }),
   ),

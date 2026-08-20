@@ -151,6 +151,8 @@ test('feed uses id tie-break and returns social aggregates', async () => {
   const first = await social.listFeed(undefined, 1, VIEWER);
   assert.equal(first[0]?.id, POST_B);
   assert.equal(first[0]?.followed_by_me, true);
+  assert.equal(first[0]?.follower_count, 1);
+  assert.equal(first[0]?.following_count, 0);
   assert.equal(first[0]?.comment_count, 1);
   assert.equal(first[0]?.tip_amount, 7);
   assert.equal(first[0]?.author_avatar, 'https://example.test/avatar.png');
@@ -193,8 +195,16 @@ test('feed only includes self, followed users, and current-week squad mates', as
 });
 
 test('follow toggles and reports are duplicate-safe', async () => {
-  assert.deepEqual(await social.toggleFollow(VIEWER, AUTHOR), { followed: false });
-  assert.deepEqual(await social.toggleFollow(VIEWER, AUTHOR), { followed: true });
+  assert.deepEqual(await social.toggleFollow(VIEWER, AUTHOR), {
+    followed: false,
+    followers: 0,
+    following: 0,
+  });
+  assert.deepEqual(await social.toggleFollow(VIEWER, AUTHOR), {
+    followed: true,
+    followers: 1,
+    following: 0,
+  });
 
   const first = await social.reportPost({
     reporterId: VIEWER,
