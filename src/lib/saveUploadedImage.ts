@@ -18,7 +18,7 @@ function safeName(name: string) {
 
 export async function saveUploadedImage(
   file: File,
-  category: 'admin' | 'social',
+  category: 'admin' | 'social' | 'ai',
 ): Promise<{ url: string; filename: string; size: number; mimeType: string } | { error: string; message: string; status: number }> {
   const ext = IMAGE_MIME_EXT[file.type];
   if (!ext) {
@@ -48,4 +48,37 @@ export async function saveUploadedImage(
     size: bytes.byteLength,
     mimeType: file.type,
   };
+}
+
+/** 把第三方临时图转存到本机 /uploads，失败返回 null（调用方可回退原 URL） */
+export async function persistRemoteImage(
+  remoteUrl: string,
+  category: 'admin' | 'social' | 'ai' = 'ai',
+): Promise<string | null> {
+  if (!/^https?:\/\//i.test(remoteUrl)) return null;
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 25_000);
+    const res = await fetch(remoteUrl, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+
+    const mime = (res.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+    const ext = IMAGE_MIME_EXT[mime];
+    if (!ext) return null;
+
+    const bytes = Buffer.from(await res.arrayBuffer());
+    if (bytes.byteLength <= 0 || bytes.byteLength > 5 * 1024 * 1024) return null;
+
+    const today = new Date().toISOString().slice(0, 10);
+    const relativeDir = path.join('uploads', category, 'images', today);
+    await mkdir(path.resolve(process.cwd(), relativeDir), { recursive: true });
+    const filename = `${Date.now()}-gen.${ext}`;
+    const relativePath = path.join(relativeDir, filename).replace(/\\/g, '/');
+    await writeFile(path.resolve(process.cwd(), relativePath), bytes);
+    return `/${relativePath}`;
+  } catch {
+    return null;
+  }
 }

@@ -2,11 +2,12 @@ import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { createGuestSession, loginOrRegisterByPhone, loginOrRegisterByWeChat, loginWithPassword, getUserAccountProfile, UserBannedError } from '../services/auth.js';
+import { bindPhoneToUser } from '../services/phoneBind.js';
 import { copyBlobsFromGuestToUser } from '../services/dataBlob.js';
 import { ensureEnergyAccount } from '../services/energy.js';
 import { verifyToken } from '../lib/jwt.js';
 import { normalizePhone, maskPhone } from '../lib/phone.js';
-import { issueAndSendCode, SmsRateLimitError, verifyCode } from '../services/sms/codeStore.js';
+import { consumeLatestCode, issueAndSendCode, SmsRateLimitError, verifyCode } from '../services/sms/codeStore.js';
 import { isSmsConfigured } from '../services/sms/tencentSms.js';
 import {
   exchangeMiniProgramCode,
@@ -273,6 +274,72 @@ authRoutes.post(
       console.error('[auth/wechat/mp/login]', err);
       return c.json({ error: 'wechat_mp_login_failed', message: '小程序登录失败，请重试' }, 401);
     }
+  },
+);
+
+authRoutes.post(
+  '/phone/bind',
+  requireAuth,
+  zValidator(
+    'json',
+    z.object({
+      phone: z.string().min(1).max(20),
+      code: z.string().regex(/^\d{6}$/),
+      confirmMerge: z.boolean().optional(),
+    }),
+  ),
+  async (c) => {
+    const auth = c.get('auth');
+    if (auth.type !== 'user') {
+      return c.json({ error: 'user_required', message: '请先登录后再绑定手机号' }, 403);
+    }
+
+    const { phone: rawPhone, code, confirmMerge } = c.req.valid('json');
+    const phone = normalizePhone(rawPhone);
+    if (!phone) {
+      return c.json({ error: 'invalid_phone', message: '请输入有效的中国大陆手机号' }, 400);
+    }
+
+    const ok = await verifyCode(phone, code, { consume: false });
+    if (!ok) {
+      return c.json({ error: 'invalid_code', message: '验证码错误或已过期' }, 401);
+    }
+
+    const result = await bindPhoneToUser({
+      userId: auth.sub,
+      phone,
+      confirmMerge: Boolean(confirmMerge),
+    });
+
+    if (!result.ok) {
+      if (result.error === 'phone_taken') {
+        return c.json({
+          error: result.error,
+          message: result.message,
+          needsMerge: true,
+          otherAccount: result.otherAccount,
+        }, 409);
+      }
+      if (result.error === 'not_found') {
+        return c.json({ error: result.error, message: result.message }, 404);
+      }
+      return c.json({
+        error: result.error,
+        message: result.message,
+        phone: 'phoneMasked' in result ? result.phoneMasked : undefined,
+      }, 409);
+    }
+
+    await consumeLatestCode(phone);
+    const profile = await getUserAccountProfile(auth.sub);
+    return c.json({
+      ok: true,
+      status: result.status,
+      phone: result.phoneMasked,
+      mergedFromUserId: result.mergedFromUserId ?? null,
+      userId: auth.sub,
+      profile,
+    });
   },
 );
 

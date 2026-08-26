@@ -70,6 +70,7 @@ jobs:
             --exclude .env \
             --exclude dist \
             --exclude .git \
+            --exclude uploads \
             -e "ssh -o StrictHostKeyChecking=no -p ${SERVER_PORT}" \
             ./ "${SERVER_USER}@${SERVER_HOST}:${REMOTE_DIR}/"
           scp -P "$SERVER_PORT" -o StrictHostKeyChecking=no .env.deploy "${SERVER_USER}@${SERVER_HOST}:${REMOTE_DIR}/.env"

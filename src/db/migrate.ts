@@ -117,8 +117,8 @@ const MIGRATION_STATEMENTS = [
      )`,
   `CREATE TABLE IF NOT EXISTS energy_accounts (
   user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  balance INT NOT NULL DEFAULT 500,
-  total_earned INT NOT NULL DEFAULT 500,
+  balance INT NOT NULL DEFAULT 0,
+  total_earned INT NOT NULL DEFAULT 0,
   total_spent INT NOT NULL DEFAULT 0,
   streak_days INT NOT NULL DEFAULT 0,
   max_streak_days INT NOT NULL DEFAULT 0,
@@ -131,6 +131,8 @@ const MIGRATION_STATEMENTS = [
 )`,
   `ALTER TABLE energy_accounts
    ADD COLUMN IF NOT EXISTS daily_earned_date DATE NOT NULL DEFAULT CURRENT_DATE`,
+  `ALTER TABLE energy_accounts ALTER COLUMN balance SET DEFAULT 0`,
+  `ALTER TABLE energy_accounts ALTER COLUMN total_earned SET DEFAULT 0`,
   `CREATE TABLE IF NOT EXISTS energy_transactions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -649,6 +651,7 @@ const MIGRATION_STATEMENTS = [
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_wechat_openid ON users (wechat_openid) WHERE wechat_openid IS NOT NULL AND deleted_at IS NULL`,
 
   // === 用户状态（管理端）===
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS merged_into_user_id UUID REFERENCES users(id)`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_at TIMESTAMPTZ`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_reason TEXT`,

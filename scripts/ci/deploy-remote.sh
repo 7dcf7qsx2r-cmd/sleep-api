@@ -6,6 +6,7 @@ REMOTE_DIR="${REMOTE_DIR:?REMOTE_DIR required}"
 ENV_FILE="${ENV_FILE:-.env}"
 
 cd "$REMOTE_DIR"
+mkdir -p uploads
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "missing $ENV_FILE in $REMOTE_DIR" >&2

@@ -584,8 +584,7 @@ export async function claimReward(
   options?: { ignoreDailyCap?: boolean },
 ): Promise<{ earned: number; account: EnergyAccountDto }> {
   if (!ENERGY_CLAIM_TYPES.has(claimType)) {
-    const account = await ensureEnergyAccount(userId);
-    return { earned: 0, account };
+    throw new Error(`invalid_claim_type:${claimType}`);
   }
   const fullSourceId = `claim:${claimType}:${sourceId}`;
   const ignoreDailyCap = options?.ignoreDailyCap ?? claimType === 'achievement';

@@ -5,6 +5,8 @@ import { z } from 'zod';
 import { requireAuth, type AuthVariables } from '../middleware/auth.js';
 import { callDeepSeek } from '../lib/deepseek.js';
 import { generateSiliconFlowImage } from '../lib/siliconflowImage.js';
+import { persistRemoteImage } from '../lib/saveUploadedImage.js';
+import { parseChatToolCalls } from '../lib/chatToolCalls.js';
 import { synthesizeSiliconFlowSpeech } from '../lib/siliconflowTts.js';
 import { transcribeSiliconFlowAudio } from '../lib/siliconflowStt.js';
 import { checkAndConsume, checkAndIncrement, getQuotaSnapshot } from '../services/quota.js';
@@ -568,6 +570,79 @@ aiRoutes.post(
   },
 );
 
+const TOOL_ROUTER_SYSTEM = `你是小眠的工具路由器。只输出一个 JSON 对象，不要 markdown，不要解释。
+格式：{"toolCalls":[{"name":"工具名","arguments":{}}]}
+规则：
+1. 只能从用户给出的工具列表里选。
+2. 最多 1 个工具。不需要工具时输出 {"toolCalls":[]}。
+3. arguments 必须是对象，没有参数就用 {}。`;
+
+aiRoutes.post(
+  '/chat-with-tools',
+  zValidator(
+    'json',
+    z.object({
+      message: z.string().min(1).max(4000),
+      tools: z.array(z.object({
+        name: z.string().min(1).max(64),
+        description: z.string().max(400),
+        parameters: z.record(z.string(), z.string()).optional(),
+      })).min(1).max(24),
+      history: historySchema.optional(),
+    }),
+  ),
+  async (c) => {
+    const auth = c.get('auth');
+    const body = c.req.valid('json');
+
+    const quota = await checkAndIncrement(auth.type, auth.sub, 'chat');
+    if (!quota.allowed) {
+      return c.json({
+        toolCalls: [],
+        isFallback: true,
+        error: 'quota_exceeded',
+        quota: quota.snapshot,
+      });
+    }
+
+    const catalog = body.tools.map((tool) => {
+      const params = tool.parameters
+        ? Object.entries(tool.parameters).map(([key, value]) => `${key}:${value}`).join(', ')
+        : '';
+      return `- ${tool.name}: ${tool.description}${params ? ` (${params})` : ''}`;
+    }).join('\n');
+
+    const history = (body.history ?? []).map((h) => ({
+      role: h.role as 'user' | 'assistant',
+      content: h.content,
+    }));
+
+    const result = await callDeepSeek({
+      messages: [
+        { role: 'system', content: TOOL_ROUTER_SYSTEM },
+        ...history,
+        { role: 'user', content: `可选工具：\n${catalog}\n\n用户：${body.message}` },
+      ],
+      temperature: 0.1,
+      maxTokens: 220,
+      timeoutMs: 14_000,
+      fallback: '{"toolCalls":[]}',
+    });
+
+    const toolCalls = parseChatToolCalls(
+      result.text,
+      body.tools.map((tool) => tool.name),
+    );
+
+    return c.json({
+      toolCalls,
+      isFallback: result.isFallback,
+      latencyMs: result.latencyMs,
+      quota: quota.snapshot,
+    });
+  },
+);
+
 aiRoutes.post(
   '/dream/interpret',
   zValidator(
@@ -1056,7 +1131,8 @@ aiRoutes.post(
         message: '文生图不可用，请配置 SILICONFLOW_API_KEY',
       }, 503);
     }
-    return c.json({ url });
+    const stored = await persistRemoteImage(url, 'ai');
+    return c.json({ url: stored ?? url });
   },
 );
 

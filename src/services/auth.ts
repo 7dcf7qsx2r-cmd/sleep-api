@@ -161,10 +161,11 @@ export async function getUserAccountProfile(userId: string) {
     id: string;
     username: string;
     phone: string | null;
+    wechat_openid: string | null;
     nickname: string | null;
     avatar_url: string | null;
   }>(
-    `SELECT u.id, u.username, u.phone, p.nickname, p.avatar_url
+    `SELECT u.id, u.username, u.phone, u.wechat_openid, p.nickname, p.avatar_url
      FROM users u
      LEFT JOIN user_profiles p ON p.user_id = u.id
      WHERE u.id = $1 AND u.deleted_at IS NULL`,
@@ -177,6 +178,7 @@ export async function getUserAccountProfile(userId: string) {
     username: user.username,
     nickname: user.nickname,
     avatarUrl: user.avatar_url,
+    wechatBound: Boolean(user.wechat_openid),
     phone: user.phone ? maskPhone(user.phone.startsWith('+') ? user.phone : `+86${user.phone.replace(/\D/g, '')}`) : null,
   };
 }

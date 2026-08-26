@@ -1,4 +1,4 @@
-import { query } from '../db/client.js';
+import { query, type SqlQuery } from '../db/client.js';
 import type { OwnerRef } from '../lib/owner.js';
 
 export const SYNC_DOMAINS = [
@@ -11,7 +11,18 @@ export const SYNC_DOMAINS = [
   'bedtime_story',
   'chat_messages',
   'voice_prefs',
+  'user_memory',
+  'user_facts',
   'sleep_nights',
+  'attributions',
+  'device_registry',
+  'sleep_audio_clips',
+  'privacy_consent',
+  'health_measure_summaries',
+  'ecg_summaries',
+  'garden_seeds',
+  'sleep_atlas',
+  'consult_summaries',
 ] as const;
 
 export type SyncDomain = typeof SYNC_DOMAINS[number];
@@ -160,6 +171,43 @@ async function logChange(owner: OwnerRef, domain: string, version: number) {
      VALUES ($1, $2, $3, $4)`,
     [owner.ownerType, owner.ownerId, domain, version],
   );
+}
+
+/** 仅填补目标账号空缺的同步域，不覆盖已有内容 */
+export async function fillEmptyBlobsFromUserToUser(
+  fromUserId: string,
+  toUserId: string,
+  q: SqlQuery = query,
+): Promise<string[]> {
+  const source = await q<{
+    domain: string;
+    data: unknown;
+    version: number;
+    updated_at: Date;
+  }>(
+    `SELECT domain, data, version, updated_at
+     FROM data_blobs
+     WHERE owner_type = 'user' AND owner_id = $1`,
+    [fromUserId],
+  );
+  const filled: string[] = [];
+  for (const blob of source.rows) {
+    const inserted = await q<{ domain: string }>(
+      `INSERT INTO data_blobs (owner_type, owner_id, domain, data, version, updated_at)
+       VALUES ('user', $1, $2, $3::jsonb, $4, $5::timestamptz)
+       ON CONFLICT (owner_type, owner_id, domain) DO NOTHING
+       RETURNING domain`,
+      [
+        toUserId,
+        blob.domain,
+        JSON.stringify(blob.data),
+        blob.version,
+        blob.updated_at.toISOString(),
+      ],
+    );
+    if (inserted.rows[0]) filled.push(inserted.rows[0].domain);
+  }
+  return filled;
 }
 
 export async function copyBlobsFromGuestToUser(guestId: string, userId: string) {

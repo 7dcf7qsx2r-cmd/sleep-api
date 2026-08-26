@@ -24,6 +24,7 @@ COPY package*.json ./
 RUN npm ci --only=production && npm cache clean --force
 
 COPY --from=builder /app/dist ./dist
+RUN mkdir -p /app/uploads
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \

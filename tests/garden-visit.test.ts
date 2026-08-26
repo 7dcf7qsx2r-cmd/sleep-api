@@ -6,6 +6,7 @@ import { after, before, test } from 'node:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { shanghaiToday } from '../src/utils/civilDate.js';
 
 const dataDir = mkdtempSync(join(tmpdir(), 'sleep-api-garden-'));
 process.env.USE_PGLITE = '1';
@@ -132,7 +133,7 @@ after(async () => {
 });
 
 test('A uploads overflow; B sees peer and claims SE+2; overflow decrements', async () => {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = shanghaiToday();
   const snap = await garden.upsertUserGarden(USER_A, {
     plants: [{ plotIndex: 0, seedId: 'moon_lily' }],
     overflowDew: 3,
@@ -170,7 +171,7 @@ test('stranger cannot visit; self-claim rejected', async () => {
 });
 
 test('daily visit cap locks after 5 claims', async () => {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = shanghaiToday();
   // 重置 A 溢出，保证够采
   await garden.upsertUserGarden(USER_A, {
     plants: [{ plotIndex: 0, seedId: 'moon_lily' }],

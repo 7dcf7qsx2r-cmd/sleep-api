@@ -4,6 +4,7 @@
 import { query, pool } from '../db/client.js';
 import { claimReward } from './energyLedger.js';
 import { weekKey } from './sleepSquad.js';
+import { shanghaiToday, toDateOnly } from '../utils/civilDate.js';
 
 export const GARDEN_DEW_PER_HARVEST_DAY = 3;
 export const GARDEN_DEW_VISIT_SE = 2;
@@ -11,7 +12,7 @@ export const GARDEN_DEW_VISIT_DAILY_MAX = 5;
 export const GARDEN_PLOT_MAX = 7;
 
 function todayStr(): string {
-  return new Date().toISOString().split('T')[0]!;
+  return shanghaiToday();
 }
 
 export type GardenPlantJson = Record<string, unknown>;
@@ -44,11 +45,7 @@ function mapGardenRow(row: {
   updated_at: Date | string;
 }): GardenSnapshotDto {
   const plants = Array.isArray(row.plants_json) ? row.plants_json as GardenPlantJson[] : [];
-  const day = row.overflow_dew_day == null
-    ? null
-    : typeof row.overflow_dew_day === 'string'
-      ? row.overflow_dew_day.slice(0, 10)
-      : row.overflow_dew_day.toISOString().slice(0, 10);
+  const day = toDateOnly(row.overflow_dew_day);
   const updatedAt = typeof row.updated_at === 'string'
     ? row.updated_at
     : row.updated_at.toISOString();
@@ -196,11 +193,7 @@ export async function listGardenPeers(visitorId: string): Promise<GardenPeerList
 
   const day = todayStr();
   return result.rows.map((row) => {
-    const overflowDay = row.overflow_dew_day == null
-      ? null
-      : typeof row.overflow_dew_day === 'string'
-        ? row.overflow_dew_day.slice(0, 10)
-        : row.overflow_dew_day.toISOString().slice(0, 10);
+    const overflowDay = toDateOnly(row.overflow_dew_day);
     const overflowLeft = normalizeOverflowForToday(
       Number(row.overflow_dew) || 0,
       overflowDay,
@@ -305,11 +298,7 @@ export async function claimGardenOverflowDew(
     );
     if (!garden.rows[0]) throw new GardenClaimError('garden_missing');
 
-    const overflowDay = garden.rows[0].overflow_dew_day == null
-      ? null
-      : typeof garden.rows[0].overflow_dew_day === 'string'
-        ? garden.rows[0].overflow_dew_day.slice(0, 10)
-        : garden.rows[0].overflow_dew_day.toISOString().slice(0, 10);
+    const overflowDay = toDateOnly(garden.rows[0].overflow_dew_day);
     let overflow = Number(garden.rows[0].overflow_dew) || 0;
     if (overflowDay !== day) overflow = 0;
     if (overflow <= 0) throw new GardenClaimError('no_overflow');

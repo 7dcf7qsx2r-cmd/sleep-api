@@ -1,4 +1,4 @@
-import { query } from '../db/client.js';
+import { query, type SqlQuery } from '../db/client.js';
 import { SHANGHAI_TODAY_SQL, toDateOnly } from '../utils/civilDate.js';
 
 export interface EnergyAccountDto {
@@ -100,6 +100,67 @@ export async function getEnergyAccount(userId: string): Promise<EnergyAccountDto
   const r = row.rows[0];
   if (!r) return null;
   return mapRow(r);
+}
+
+/** 把来源账号能量加进当前账号，不清空来源以外的现有余额 */
+export async function absorbEnergyFromUser(
+  fromUserId: string,
+  toUserId: string,
+  q: SqlQuery = query,
+): Promise<number> {
+  const source = await q<{ balance: number }>(
+    `SELECT balance FROM energy_accounts WHERE user_id = $1`,
+    [fromUserId],
+  );
+  const amount = source.rows[0]?.balance ?? 0;
+  if (!source.rows[0]) return 0;
+
+  await q(
+    `INSERT INTO energy_accounts (
+      user_id, balance, total_earned, total_spent, streak_days, max_streak_days,
+      daily_earned, daily_cap, daily_earned_date, version
+    )
+    SELECT $1, 0, 0, 0, 0, 0, 0, daily_cap, daily_earned_date, 1
+    FROM energy_accounts WHERE user_id = $2
+    ON CONFLICT (user_id) DO NOTHING`,
+    [toUserId, fromUserId],
+  );
+
+  await q(
+    `UPDATE energy_accounts AS t
+     SET balance = t.balance + s.balance,
+         total_earned = t.total_earned + s.total_earned,
+         total_spent = t.total_spent + s.total_spent,
+         streak_days = GREATEST(t.streak_days, s.streak_days),
+         max_streak_days = GREATEST(t.max_streak_days, s.max_streak_days),
+         last_check_in = CASE
+           WHEN s.last_check_in IS NULL THEN t.last_check_in
+           WHEN t.last_check_in IS NULL THEN s.last_check_in
+           WHEN s.last_check_in > t.last_check_in THEN s.last_check_in
+           ELSE t.last_check_in
+         END,
+         version = t.version + 1,
+         updated_at = NOW()
+     FROM energy_accounts AS s
+     WHERE t.user_id = $1 AND s.user_id = $2`,
+    [toUserId, fromUserId],
+  );
+
+  if (amount > 0) {
+    await q(
+      `INSERT INTO energy_transactions (user_id, type, amount, description, source_id)
+       VALUES ($1, 'grant', $2, '账号合并转入', $3)`,
+      [toUserId, amount, `account-merge:${fromUserId}`],
+    );
+  }
+
+  await q(
+    `UPDATE energy_accounts
+     SET balance = 0, version = version + 1, updated_at = NOW()
+     WHERE user_id = $1`,
+    [fromUserId],
+  );
+  return amount;
 }
 
 function mapRow(r: {

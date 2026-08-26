@@ -66,7 +66,12 @@ export async function issueAndSendCode(phone: string, ip?: string): Promise<{ ex
   return { expiresIn: config.sms.codeTtlSec };
 }
 
-export async function verifyCode(phone: string, code: string): Promise<boolean> {
+export async function verifyCode(
+  phone: string,
+  code: string,
+  opts?: { consume?: boolean },
+): Promise<boolean> {
+  const consume = opts?.consume !== false;
   const row = await query<{
     id: string;
     code_hash: string;
@@ -91,9 +96,23 @@ export async function verifyCode(phone: string, code: string): Promise<boolean> 
   await query(
     `UPDATE sms_verification_codes
      SET attempt_count = attempt_count + 1,
-         used_at = CASE WHEN $2 THEN NOW() ELSE used_at END
+         used_at = CASE WHEN $2 AND $3 THEN NOW() ELSE used_at END
      WHERE id = $1`,
-    [rec.id, ok],
+    [rec.id, ok, consume],
   );
   return ok;
+}
+
+/** 绑定成功后再作废验证码，避免冲突提示后无法用同一条码确认合并 */
+export async function consumeLatestCode(phone: string): Promise<void> {
+  await query(
+    `UPDATE sms_verification_codes
+     SET used_at = NOW()
+     WHERE id = (
+       SELECT id FROM sms_verification_codes
+       WHERE phone = $1 AND purpose = 'login' AND used_at IS NULL
+       ORDER BY created_at DESC LIMIT 1
+     )`,
+    [phone],
+  );
 }

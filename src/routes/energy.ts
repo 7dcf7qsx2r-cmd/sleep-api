@@ -11,6 +11,7 @@ import {
   getTaskProgress,
   listTransactions,
   spendEnergy,
+  ENERGY_CLAIM_TYPES,
 } from '../services/energyLedger.js';
 
 export const energyRoutes = new Hono<{ Variables: AuthVariables }>();
@@ -120,6 +121,9 @@ energyRoutes.post(
     const userId = requireUser(c);
     if (!userId) return c.json({ error: 'guest_forbidden' }, 403);
     const body = c.req.valid('json');
+    if (!ENERGY_CLAIM_TYPES.has(body.claimType)) {
+      return c.json({ error: 'invalid_claim_type', message: '未知奖励类型' }, 400);
+    }
     const result = await claimReward(
       userId,
       body.claimType,
