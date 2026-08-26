@@ -18,6 +18,7 @@ healthRoutes.get('/', (c) =>
       energy: '/energy/account · /energy/spend · /energy/tasks',
       shop: '/shop/products · /shop/purchase',
       radar: '/api/radar/datapost · /api/radar/latest · /api/radar/report',
+      iot: '/iot/devices · /iot/devices/bind',
     },
     app: '请使用小眠 App 或官网 Web 版本',
   }),

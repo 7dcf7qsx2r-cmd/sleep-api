@@ -12,6 +12,7 @@ import { socialRoutes } from './routes/social.js';
 import { gardenRoutes } from './routes/garden.js';
 import { pushRoutes } from './routes/push.js';
 import { radarRoutes } from './routes/radar.js';
+import { iotRoutes } from './routes/iot.js';
 import { adminRoutes } from './routes/admin/index.js';
 import { expertRoutes } from './routes/experts.js';
 import { contentRoutes } from './routes/content.js';
@@ -51,6 +52,7 @@ export function createApp() {
   app.route('/social/garden', gardenRoutes);
   app.route('/push', pushRoutes);
   app.route('/api/radar', radarRoutes);
+  app.route('/iot', iotRoutes);
   app.route('/experts', expertRoutes);
   app.route('/content', contentRoutes);
   app.route('/report', reportRoutes);

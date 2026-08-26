@@ -1,4 +1,5 @@
 import { closeDb, query } from './client.js';
+import { IOT_MIGRATION_STATEMENTS } from './iotSchema.js';
 
 const MIGRATION_STATEMENTS = [
   `CREATE EXTENSION IF NOT EXISTS "pgcrypto"`,
@@ -620,6 +621,9 @@ const MIGRATION_STATEMENTS = [
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`,
   `CREATE INDEX IF NOT EXISTS idx_radar_reports_mac ON radar_sleep_reports (mac, created_at DESC)`,
+
+  // === MQTT 床旁设备（与 sleep-mqtt 共库，原文 JSONB）===
+  ...IOT_MIGRATION_STATEMENTS,
 
   // === 手机号短信登录 ===
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT`,
