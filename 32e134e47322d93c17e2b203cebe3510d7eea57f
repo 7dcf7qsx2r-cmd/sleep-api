@@ -1,0 +1,64 @@
+src/services/auth.ts
+  4c5b675c683fbb53 164,168,181
+Dockerfile
+  4c5b675c683fbb53 27
+scripts/ci/deploy-remote.sh
+  4c5b675c683fbb53 9
+src/services/energy.ts
+  4c5b675c683fbb53 1,105-165
+src/services/dataBlob.ts
+  4c5b675c683fbb53 1,14-15,17-25,176-212
+src/routes/energy.ts
+  4c5b675c683fbb53 14,124-126
+src/services/energyLedger.ts
+  4c5b675c683fbb53 587
+src/lib/saveUploadedImage.ts
+  4c5b675c683fbb53 21,52-84
+tests/sync-domains-claim.test.ts
+  4c5b675c683fbb53 1-69
+src/db/migrate.ts
+  4c5b675c683fbb53 120-121,134-135,654
+src/services/garden.ts
+  4c5b675c683fbb53 7,15,48,196,301
+src/lib/chatToolCalls.ts
+  4c5b675c683fbb53 1-42
+tests/chat-tool-calls.test.ts
+  4c5b675c683fbb53 1-39
+.github/workflows/deploy-production.yml
+  4c5b675c683fbb53 73
+src/routes/ai.ts
+  4c5b675c683fbb53 8-9,573-645,1134-1135
+src/services/phoneBind.ts
+  4c5b675c683fbb53 1-157
+tests/phone-bind.test.ts
+  4c5b675c683fbb53 1-267
+tests/garden-visit.test.ts
+  4c5b675c683fbb53 9,136,174
+.github/workflows/deploy-uat.yml
+  4c5b675c683fbb53 73
+src/services/sms/codeStore.ts
+  4c5b675c683fbb53 69-74,99,101,105-117
+src/routes/auth.ts
+  4c5b675c683fbb53 5,10,280-345
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "32e134e47322d93c17e2b203cebe3510d7eea57f",
+  "prompts": {
+    "4c5b675c683fbb53": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9b8d194a-3b07-4f5a-b48c-7554b28d133f",
+        "model": "grok-4.6"
+      },
+      "human_author": "pengjun5437513 <cunminjia@qq.com>",
+      "messages": [],
+      "total_additions": 298,
+      "total_deletions": 28,
+      "accepted_lines": 912,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/835e89d12af0e8a133db70113fa8bfca08228d207ee39a38fe50e1b2df7b8f57"
+    }
+  }
+}
