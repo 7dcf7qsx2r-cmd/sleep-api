@@ -1,0 +1,36 @@
+tests/iot-bind.test.ts
+  4c5b675c683fbb53 1-95
+src/routes/iot.ts
+  4c5b675c683fbb53 1-127
+src/routes/health.ts
+  4c5b675c683fbb53 21
+src/app.ts
+  4c5b675c683fbb53 15,55
+src/db/iotSchema.ts
+  4c5b675c683fbb53 1-47
+src/services/iot.ts
+  4c5b675c683fbb53 1-227
+src/db/migrate.ts
+  4c5b675c683fbb53 2,625-627
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f1caecac8401edefd3a24aaf3e7c00ddb4c9a96a",
+  "prompts": {
+    "4c5b675c683fbb53": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9b8d194a-3b07-4f5a-b48c-7554b28d133f",
+        "model": "grok-4.6"
+      },
+      "human_author": "pengjun5437513 <cunminjia@qq.com>",
+      "messages": [],
+      "total_additions": 1188,
+      "total_deletions": 75,
+      "accepted_lines": 1120,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/794fc100dffe65b4701d953a6ed1c17d18b8f82261d5a35865228e6ee67d495c"
+    }
+  }
+}
