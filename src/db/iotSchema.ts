@@ -5,6 +5,7 @@ export const IOT_MIGRATION_STATEMENTS = [
     name TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`,
+  `ALTER TABLE iot_products ADD COLUMN IF NOT EXISTS product_secret TEXT`,
   `CREATE TABLE IF NOT EXISTS iot_devices (
     sn TEXT PRIMARY KEY,
     product_key TEXT NOT NULL REFERENCES iot_products(product_key),

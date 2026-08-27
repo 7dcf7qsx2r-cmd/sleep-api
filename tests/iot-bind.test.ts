@@ -47,6 +47,7 @@ describe('iot bind', { concurrency: false }, () => {
     const first = await iot.bindIotDevice({ userId: USER_A, sn: 'sndemo0001', model: 'CIS IB' });
     assert.equal(first.sn, 'SNDEMO0001');
     assert.equal(first.model, 'CIS-IB');
+    assert.equal(first.productKey, 'cis_ib');
     const again = await iot.bindIotDevice({ userId: USER_A, sn: 'SNDEMO0001', alias: '床旁' });
     assert.equal(again.alias, '床旁');
     assert.equal(again.model, 'CIS-IB');

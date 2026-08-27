@@ -2,6 +2,17 @@ import { query } from '../db/client.js';
 
 export const DEFAULT_IOT_PRODUCT_KEY = 'xiaomian_mvp';
 
+export const CIS_PRODUCT_KEYS = {
+  'CIS-IB': 'cis_ib',
+  'CIS-ISWB': 'cis_iswb',
+  'CIS-IP': 'cis_ip',
+} as const;
+
+export function productKeyForCisModel(model?: string | null): string | null {
+  const normalized = normalizeCisModel(model);
+  return normalized ? CIS_PRODUCT_KEYS[normalized] : null;
+}
+
 export const CIS_MODELS = ['CIS-IB', 'CIS-ISWB', 'CIS-IP'] as const;
 export type CisModel = (typeof CIS_MODELS)[number];
 
@@ -69,8 +80,6 @@ export async function bindIotDevice(input: {
   if (!isValidIotSn(sn)) {
     throw new IotBindError('invalid_sn', '设备 SN 无效，请填写机身序列号');
   }
-  const productKey = (input.productKey?.trim() || DEFAULT_IOT_PRODUCT_KEY);
-  const alias = input.alias?.trim() || null;
   let model: CisModel | null = null;
   if (input.model != null && input.model.trim() !== '') {
     model = normalizeCisModel(input.model);
@@ -78,15 +87,29 @@ export async function bindIotDevice(input: {
       throw new IotBindError('invalid_model', '设备型号无效');
     }
   }
-
-  const existing = await query<{ user_id: string }>(
-    `SELECT user_id FROM iot_device_bindings WHERE product_key = $1 AND sn = $2`,
-    [productKey, sn],
+  const registered = await query<{ product_key: string }>(
+    `SELECT product_key FROM iot_devices WHERE sn = $1`,
+    [sn],
+  );
+  const existing = await query<{ user_id: string; product_key: string; model: string | null }>(
+    `SELECT user_id, product_key, model FROM iot_device_bindings WHERE sn = $1`,
+    [sn],
   );
   const owner = existing.rows[0]?.user_id;
   if (owner && owner !== input.userId) {
     throw new IotBindError('already_bound', '该设备已绑定其他账号');
   }
+  if (!model && existing.rows[0]?.model) {
+    model = normalizeCisModel(existing.rows[0].model);
+  }
+  const productKey = (
+    input.productKey?.trim()
+    || existing.rows[0]?.product_key
+    || registered.rows[0]?.product_key
+    || productKeyForCisModel(model)
+    || DEFAULT_IOT_PRODUCT_KEY
+  );
+  const alias = input.alias?.trim() || null;
 
   await query(
     `INSERT INTO iot_device_bindings (product_key, sn, user_id, alias, model, bound_at)
@@ -112,12 +135,18 @@ export async function bindIotDevice(input: {
   };
 }
 
-export async function unbindIotDevice(userId: string, sn: string, productKey = DEFAULT_IOT_PRODUCT_KEY): Promise<void> {
+export async function unbindIotDevice(userId: string, sn: string, productKey?: string): Promise<void> {
   const id = normalizeIotSn(sn);
+  const params = productKey
+    ? [userId, id, productKey]
+    : [userId, id];
   const { rowCount } = await query(
-    `DELETE FROM iot_device_bindings
-     WHERE user_id = $1 AND sn = $2 AND product_key = $3`,
-    [userId, id, productKey],
+    productKey
+      ? `DELETE FROM iot_device_bindings
+         WHERE user_id = $1 AND sn = $2 AND product_key = $3`
+      : `DELETE FROM iot_device_bindings
+         WHERE user_id = $1 AND sn = $2`,
+    params,
   );
   if (rowCount === 0) {
     throw new IotBindError('not_bound', '未绑定该设备');
@@ -151,10 +180,12 @@ export async function listBoundIotDevices(userId: string): Promise<IotBinding[]>
   }));
 }
 
-async function assertOwned(userId: string, sn: string, productKey: string): Promise<void> {
+async function assertOwned(userId: string, sn: string, productKey?: string): Promise<void> {
   const { rows } = await query<{ user_id: string }>(
-    `SELECT user_id FROM iot_device_bindings WHERE product_key = $1 AND sn = $2`,
-    [productKey, sn],
+    productKey
+      ? `SELECT user_id FROM iot_device_bindings WHERE product_key = $1 AND sn = $2`
+      : `SELECT user_id FROM iot_device_bindings WHERE sn = $1`,
+    productKey ? [productKey, sn] : [sn],
   );
   if (!rows[0]) throw new IotBindError('not_found', '未绑定该设备');
   if (rows[0].user_id !== userId) throw new IotBindError('not_found', '未绑定该设备');
@@ -163,7 +194,7 @@ async function assertOwned(userId: string, sn: string, productKey: string): Prom
 export async function getOwnedIotLatest(
   userId: string,
   sn: string,
-  productKey = DEFAULT_IOT_PRODUCT_KEY,
+  productKey?: string,
 ): Promise<IotLatestMessage | null> {
   const id = normalizeIotSn(sn);
   await assertOwned(userId, id, productKey);
@@ -178,7 +209,11 @@ export async function getOwnedIotLatest(
      FROM iot_messages_latest
      WHERE sn = $1
      ORDER BY
-       CASE WHEN topic LIKE '%/up/realtime' THEN 0 ELSE 1 END,
+       CASE
+         WHEN topic LIKE '%/thing/property/post' THEN 0
+         WHEN topic LIKE '%/up/realtime' THEN 1
+         ELSE 2
+       END,
        received_at DESC
      LIMIT 1`,
     [id],
@@ -197,7 +232,7 @@ export async function getOwnedIotLatest(
 export async function listOwnedIotMessages(
   userId: string,
   sn: string,
-  productKey = DEFAULT_IOT_PRODUCT_KEY,
+  productKey?: string,
   limit = 50,
 ): Promise<IotLatestMessage[]> {
   const id = normalizeIotSn(sn);
