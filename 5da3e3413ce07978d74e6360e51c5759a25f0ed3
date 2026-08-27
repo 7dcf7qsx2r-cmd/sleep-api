@@ -1,0 +1,28 @@
+tests/iot-bind.test.ts
+  4c5b675c683fbb53 50
+src/db/iotSchema.ts
+  4c5b675c683fbb53 8
+src/services/iot.ts
+  4c5b675c683fbb53 5-15,90-96,102-112,138,140-142,144-149,183,185-188,197,212-216,235
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5da3e3413ce07978d74e6360e51c5759a25f0ed3",
+  "prompts": {
+    "4c5b675c683fbb53": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9b8d194a-3b07-4f5a-b48c-7554b28d133f",
+        "model": "grok-4.6"
+      },
+      "human_author": "pengjun5437513 <cunminjia@qq.com>",
+      "messages": [],
+      "total_additions": 60,
+      "total_deletions": 23,
+      "accepted_lines": 58,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/26d9c467cadd64f98e70c9cd103d6fc48696d1b685b827aae9c55da99dac4bfc"
+    }
+  }
+}
