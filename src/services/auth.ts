@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
-import { query } from '../db/client.js';
+import { query, withTransaction } from '../db/client.js';
 import { signToken } from '../lib/jwt.js';
 import { maskPhone } from '../lib/phone.js';
 import { ensureEnergyAccount } from './energy.js';
@@ -201,4 +201,42 @@ async function upsertWeChatProfile(
        updated_at = NOW()`,
     [userId, trimmedNick ?? null, trimmedAvatar ?? null],
   );
+}
+
+export async function deleteUserAccount(userId: string): Promise<boolean> {
+  const existing = await query<{ id: string }>(
+    `SELECT id FROM users WHERE id = $1 AND deleted_at IS NULL`,
+    [userId],
+  );
+  if (!existing.rows[0]) return false;
+
+  const tombstoneUsername = `deleted_${userId.replace(/-/g, '')}`;
+  const passwordHash = await bcrypt.hash(crypto.randomUUID(), 10);
+
+  await withTransaction(async (q) => {
+    await q(
+      `UPDATE users
+       SET deleted_at = NOW(),
+           phone = NULL,
+           wechat_openid = NULL,
+           wechat_unionid = NULL,
+           username = $2,
+           password_hash = $3
+       WHERE id = $1 AND deleted_at IS NULL`,
+      [userId, tombstoneUsername, passwordHash],
+    );
+    await q(
+      `UPDATE user_profiles
+       SET nickname = '已注销用户',
+           avatar_url = NULL,
+           updated_at = NOW()
+       WHERE user_id = $1`,
+      [userId],
+    );
+    await q(
+      `DELETE FROM data_blobs WHERE owner_type = 'user' AND owner_id = $1`,
+      [userId],
+    );
+  });
+  return true;
 }

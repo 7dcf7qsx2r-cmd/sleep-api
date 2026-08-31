@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
-import { createGuestSession, loginOrRegisterByPhone, loginOrRegisterByWeChat, loginWithPassword, getUserAccountProfile, UserBannedError } from '../services/auth.js';
+import { createGuestSession, loginOrRegisterByPhone, loginOrRegisterByWeChat, loginWithPassword, getUserAccountProfile, deleteUserAccount, UserBannedError } from '../services/auth.js';
 import { bindPhoneToUser } from '../services/phoneBind.js';
 import { copyBlobsFromGuestToUser } from '../services/dataBlob.js';
 import { ensureEnergyAccount } from '../services/energy.js';
@@ -353,6 +353,18 @@ authRoutes.get('/me', requireAuth, async (c) => {
     return c.json({ error: 'not_found' }, 404);
   }
   return c.json({ profile });
+});
+
+authRoutes.post('/account/delete', requireAuth, async (c) => {
+  const auth = c.get('auth');
+  if (auth.type !== 'user') {
+    return c.json({ error: 'user_required', message: '请先登录后再注销账号' }, 403);
+  }
+  const ok = await deleteUserAccount(auth.sub);
+  if (!ok) {
+    return c.json({ error: 'not_found', message: '账号不存在或已注销' }, 404);
+  }
+  return c.json({ ok: true, message: '账号已注销' });
 });
 
 authRoutes.post(
