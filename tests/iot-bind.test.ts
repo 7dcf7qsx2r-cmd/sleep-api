@@ -74,6 +74,7 @@ describe('iot bind', { concurrency: false }, () => {
 
     const latest = await iot.getOwnedIotLatest(USER_A, 'sndemo0001');
     assert.equal((latest?.raw as { hr?: number })?.hr, 61);
+    assert.equal(latest?.sleepRaw, undefined);
 
     await assert.rejects(
       () => iot.getOwnedIotLatest(USER_B, 'SNDEMO0001'),
@@ -84,6 +85,109 @@ describe('iot bind', { concurrency: false }, () => {
     assert.equal(mine.length, 1);
     const other = await iot.listBoundIotDevices(USER_B);
     assert.equal(other.length, 0);
+  });
+
+  test('latest keeps realtime raw and attaches the last SleepReportNew', async () => {
+    await iot.bindIotDevice({ userId: USER_A, sn: '14639369CE28', model: 'CIS IP' });
+    const sleepPayload = {
+      method: 'thing.property.post',
+      params: {
+        deviceName: '14639369CE28',
+        SleepReportNew: {
+          moving: 1,
+          person: 1,
+          snoreStatus: 2,
+          snoreKill: 0,
+          db: 38,
+          heartRate: 66,
+          breathing: 16,
+        },
+      },
+    };
+    const realtimePayload = {
+      method: 'thing.property.post',
+      params: {
+        deviceName: '14639369CE28',
+        deviceStatus: { heart: 0, person: 0, breathing: 0 },
+      },
+    };
+    await query(
+      `INSERT INTO iot_messages (product_key, sn, topic, raw_json, received_at)
+       VALUES
+         ('cis_ip', '14639369CE28', '/sys/cis_ip/14639369CE28/thing/property/post', $1::jsonb, NOW() - INTERVAL '2 minutes'),
+         ('cis_ip', '14639369CE28', '/sys/cis_ip/14639369CE28/thing/property/post', $2::jsonb, NOW())`,
+      [JSON.stringify(sleepPayload), JSON.stringify(realtimePayload)],
+    );
+    await query(
+      `INSERT INTO iot_messages_latest (sn, topic, product_key, raw_json, received_at)
+       VALUES ('14639369CE28', '/sys/cis_ip/14639369CE28/thing/property/post', 'cis_ip', $1::jsonb, NOW())
+       ON CONFLICT (sn, topic) DO UPDATE SET raw_json = EXCLUDED.raw_json, received_at = EXCLUDED.received_at`,
+      [JSON.stringify(realtimePayload)],
+    );
+
+    const latest = await iot.getOwnedIotLatest(USER_A, '14639369CE28');
+    assert.equal((latest?.raw as { params?: { deviceStatus?: { heart?: number } } })?.params?.deviceStatus?.heart, 0);
+    assert.equal(
+      (latest?.sleepRaw as { params?: { SleepReportNew?: { heartRate?: number; moving?: number } } })
+        ?.params?.SleepReportNew?.heartRate,
+      66,
+    );
+    assert.equal(
+      (latest?.sleepRaw as { params?: { SleepReportNew?: { moving?: number } } })?.params?.SleepReportNew?.moving,
+      1,
+    );
+    assert.ok(latest?.sleepReceivedAt);
+  });
+
+  test('latest attaches characteristic separately from realtime', async () => {
+    await iot.bindIotDevice({ userId: USER_A, sn: '94A990CA5268', model: 'CIS ISWB' });
+    const configPayload = {
+      method: 'thing.property.post',
+      params: {
+        productKey: 'cis_iswb',
+        deviceName: '94A990CA5268',
+        firmwareVer: 'ALISWB21-260827A',
+        characteristic: {
+          bleName: 'AL-ISWB21200-94A990CA5268',
+          reportIerVal: 60,
+          heatNum: 2,
+          minPressure: 800,
+          maxPressure: 12000,
+        },
+      },
+    };
+    const realtimePayload = {
+      method: 'thing.property.post',
+      params: {
+        deviceName: '94A990CA5268',
+        heartData: [0, 0, 0, 0, 0, 0],
+        pressureLeft: 686,
+      },
+    };
+    await query(
+      `INSERT INTO iot_messages (product_key, sn, topic, raw_json, received_at)
+       VALUES
+         ('cis_iswb', '94A990CA5268', '/sys/cis_iswb/94A990CA5268/thing/property/post', $1::jsonb, NOW() - INTERVAL '1 hour'),
+         ('cis_iswb', '94A990CA5268', '/sys/cis_iswb/94A990CA5268/thing/property/post', $2::jsonb, NOW())`,
+      [JSON.stringify(configPayload), JSON.stringify(realtimePayload)],
+    );
+    await query(
+      `INSERT INTO iot_messages_latest (sn, topic, product_key, raw_json, received_at)
+       VALUES ('94A990CA5268', '/sys/cis_iswb/94A990CA5268/thing/property/post', 'cis_iswb', $1::jsonb, NOW())
+       ON CONFLICT (sn, topic) DO UPDATE SET raw_json = EXCLUDED.raw_json, received_at = EXCLUDED.received_at`,
+      [JSON.stringify(realtimePayload)],
+    );
+
+    const latest = await iot.getOwnedIotLatest(USER_A, '94A990CA5268');
+    assert.equal((latest?.raw as { params?: { pressureLeft?: number } })?.params?.pressureLeft, 686);
+    assert.equal(
+      (latest?.configRaw as { params?: { firmwareVer?: string } })?.params?.firmwareVer,
+      'ALISWB21-260827A',
+    );
+    assert.equal(
+      (latest?.configRaw as { params?: { characteristic?: { heatNum?: number } } })?.params?.characteristic?.heatNum,
+      2,
+    );
   });
 
   test('unbind removes ownership', async () => {

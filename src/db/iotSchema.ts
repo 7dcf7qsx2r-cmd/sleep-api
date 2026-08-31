@@ -36,6 +36,11 @@ export const IOT_MIGRATION_STATEMENTS = [
     received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`,
   `CREATE INDEX IF NOT EXISTS idx_iot_messages_sn_time ON iot_messages (sn, received_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_iot_messages_sn_sleep ON iot_messages (sn, received_at DESC)
+    WHERE raw_json->'params'->'SleepReportNew' IS NOT NULL
+       OR raw_json->'params'->'sleepReportNew' IS NOT NULL`,
+  `CREATE INDEX IF NOT EXISTS idx_iot_messages_sn_config ON iot_messages (sn, received_at DESC)
+    WHERE raw_json->'params'->'characteristic' IS NOT NULL`,
   `CREATE TABLE IF NOT EXISTS iot_messages_latest (
     sn TEXT NOT NULL,
     topic TEXT NOT NULL,

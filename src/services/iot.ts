@@ -69,6 +69,10 @@ export interface IotLatestMessage {
   topic: string;
   raw: unknown;
   receivedAt: string;
+  sleepRaw?: unknown;
+  sleepReceivedAt?: string;
+  configRaw?: unknown;
+  configReceivedAt?: string;
 }
 
 const ONLINE_MS = 3 * 60 * 1000;
@@ -211,6 +215,54 @@ async function assertOwned(userId: string, sn: string, productKey?: string): Pro
   }
 }
 
+function iotParams(raw: unknown): Record<string, unknown> | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const obj = raw as Record<string, unknown>;
+  if (obj.params && typeof obj.params === 'object' && !Array.isArray(obj.params)) {
+    return obj.params as Record<string, unknown>;
+  }
+  return obj;
+}
+
+function payloadHasSleepReport(raw: unknown): boolean {
+  const params = iotParams(raw);
+  return params != null && (params.SleepReportNew != null || params.sleepReportNew != null);
+}
+
+function payloadHasConfig(raw: unknown): boolean {
+  const params = iotParams(raw);
+  return params != null && params.characteristic != null;
+}
+
+async function getLatestParamRaw(
+  sn: string,
+  sqlFilter: string,
+): Promise<{ raw: unknown; receivedAt: string } | null> {
+  const { rows } = await query<{ raw_json: unknown; received_at: Date }>(
+    `SELECT raw_json, received_at
+     FROM iot_messages
+     WHERE sn = $1 AND (${sqlFilter})
+     ORDER BY received_at DESC
+     LIMIT 1`,
+    [sn],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return { raw: row.raw_json, receivedAt: row.received_at.toISOString() };
+}
+
+function getLatestSleepRaw(sn: string) {
+  return getLatestParamRaw(
+    sn,
+    `raw_json->'params'->'SleepReportNew' IS NOT NULL
+     OR raw_json->'params'->'sleepReportNew' IS NOT NULL`,
+  );
+}
+
+function getLatestConfigRaw(sn: string) {
+  return getLatestParamRaw(sn, `raw_json->'params'->'characteristic' IS NOT NULL`);
+}
+
 export async function getOwnedIotLatest(
   userId: string,
   sn: string,
@@ -240,12 +292,23 @@ export async function getOwnedIotLatest(
   );
   const row = rows[0];
   if (!row) return null;
+  const receivedAt = row.received_at.toISOString();
+  const [sleep, config] = await Promise.all([
+    payloadHasSleepReport(row.raw_json)
+      ? Promise.resolve({ raw: row.raw_json, receivedAt })
+      : getLatestSleepRaw(id),
+    payloadHasConfig(row.raw_json)
+      ? Promise.resolve({ raw: row.raw_json, receivedAt })
+      : getLatestConfigRaw(id),
+  ]);
   return {
     productKey: row.product_key,
     sn: row.sn,
     topic: row.topic,
     raw: row.raw_json,
-    receivedAt: row.received_at.toISOString(),
+    receivedAt,
+    ...(sleep ? { sleepRaw: sleep.raw, sleepReceivedAt: sleep.receivedAt } : {}),
+    ...(config ? { configRaw: config.raw, configReceivedAt: config.receivedAt } : {}),
   };
 }
 
