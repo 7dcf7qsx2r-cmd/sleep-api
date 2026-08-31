@@ -725,6 +725,20 @@ const MIGRATION_STATEMENTS = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_garden_dew_claims_visitor_day
    ON garden_dew_claims (visitor_id, day)`,
+
+  `ALTER TABLE user_gardens ADD COLUMN IF NOT EXISTS pests_json JSONB NOT NULL DEFAULT '[]'::jsonb`,
+  `ALTER TABLE user_gardens ADD COLUMN IF NOT EXISTS pest_spawn_day DATE`,
+  `ALTER TABLE user_gardens ADD COLUMN IF NOT EXISTS nourish_kind TEXT`,
+  `CREATE TABLE IF NOT EXISTS garden_help_daily (
+    owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    visitor_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    day DATE NOT NULL,
+    smash_count INT NOT NULL DEFAULT 0 CHECK (smash_count >= 0),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (owner_id, visitor_id, day)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_garden_help_daily_owner_day
+   ON garden_help_daily (owner_id, day)`,
 ];
 
 async function main() {

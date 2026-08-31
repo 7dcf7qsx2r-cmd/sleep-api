@@ -85,7 +85,18 @@ before(async () => {
       overflow_dew INT NOT NULL DEFAULT 0,
       overflow_dew_day DATE,
       plot_count INT NOT NULL DEFAULT 0,
+      pests_json JSONB NOT NULL DEFAULT '[]',
+      pest_spawn_day DATE,
+      nourish_kind TEXT,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+    `CREATE TABLE garden_help_daily (
+      owner_id UUID NOT NULL REFERENCES users(id),
+      visitor_id UUID NOT NULL REFERENCES users(id),
+      day DATE NOT NULL,
+      smash_count INT NOT NULL DEFAULT 0,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (owner_id, visitor_id, day)
     )`,
     `CREATE TABLE garden_visit_daily (
       visitor_id UUID NOT NULL REFERENCES users(id),
@@ -206,4 +217,119 @@ test('daily visit cap locks after 5 claims', async () => {
     () => garden.claimGardenOverflowDew(USER_B, USER_A),
     (err: unknown) => err instanceof garden.GardenClaimError && err.code === 'daily_capped',
   );
+});
+
+function samplePest(id: string, slot: number) {
+  return {
+    id,
+    plotIndex: 0,
+    slot,
+    monsterId: 'ddl',
+    spawnedDay: shanghaiToday(),
+  };
+}
+
+test('A uploads pests; B sees pestLeft and smashes SE+3; help recorded', async () => {
+  const today = shanghaiToday();
+  await query('DELETE FROM garden_visit_daily WHERE visitor_id = $1', [USER_B]);
+  await query('DELETE FROM garden_dew_claims WHERE visitor_id = $1', [USER_B]);
+  await query('DELETE FROM garden_help_daily');
+
+  const snap = await garden.upsertUserGarden(USER_A, {
+    plants: [{ plotIndex: 0, seedId: 'moon_lily' }],
+    overflowDew: 0,
+    overflowDewDay: today,
+    pests: [samplePest('pest_a', 0), samplePest('pest_b', 1), samplePest('pest_c', 2)],
+    pestSpawnDay: today,
+    nourishKind: 'hurt',
+    pestsReplace: true,
+  });
+  assert.equal(snap.pestLeft, 3);
+  assert.equal(snap.pests[0]?.id, 'pest_a');
+
+  const peers = await garden.listGardenPeers(USER_B);
+  assert.equal(peers[0]?.pestLeft, 3);
+
+  const before = await ensureEnergyAccount(USER_B);
+  const smash = await garden.smashGardenPest(USER_B, USER_A, 'pest_a');
+  assert.equal(smash.earned, garden.GARDEN_PEST_SMASH_SE);
+  assert.equal(smash.pestLeft, 2);
+  assert.equal(smash.ownSmash, false);
+  assert.equal(smash.visits, 1);
+
+  const after = await ensureEnergyAccount(USER_B);
+  assert.equal(after.balance, before.balance + garden.GARDEN_PEST_SMASH_SE);
+
+  const owner = await garden.getUserGarden(USER_A);
+  assert.equal(owner?.pestLeft, 2);
+  assert.equal(owner?.pests.some((p) => p.id === 'pest_a'), false);
+
+  const helpers = await garden.listGardenHelpToday(USER_A);
+  assert.equal(helpers.length, 1);
+  assert.equal(helpers[0]?.peerId, USER_B);
+  assert.equal(helpers[0]?.count, 1);
+  assert.equal(helpers[0]?.alias, '访客B');
+});
+
+test('same-day upsert does not restore smashed pests', async () => {
+  const today = shanghaiToday();
+  const restored = await garden.upsertUserGarden(USER_A, {
+    plants: [{ plotIndex: 0, seedId: 'moon_lily' }],
+    overflowDew: 0,
+    overflowDewDay: today,
+    pests: [samplePest('pest_a', 0), samplePest('pest_b', 1), samplePest('pest_c', 2)],
+    pestSpawnDay: today,
+  });
+  assert.equal(restored.pestLeft, 2);
+  assert.equal(restored.pests.some((p) => p.id === 'pest_a'), false);
+});
+
+test('owner smash removes pest without SE or visit count', async () => {
+  const beforeVisits = await garden.getVisitProgress(USER_A);
+  const beforeEnergy = await ensureEnergyAccount(USER_A);
+  const smash = await garden.smashGardenPest(USER_A, USER_A, 'pest_b');
+  assert.equal(smash.earned, 0);
+  assert.equal(smash.ownSmash, true);
+  assert.equal(smash.pestLeft, 1);
+  const afterVisits = await garden.getVisitProgress(USER_A);
+  assert.equal(afterVisits.visits, beforeVisits.visits);
+  const afterEnergy = await ensureEnergyAccount(USER_A);
+  assert.equal(afterEnergy.balance, beforeEnergy.balance);
+});
+
+test('stranger cannot smash; missing pest rejected', async () => {
+  await assert.rejects(
+    () => garden.smashGardenPest(STRANGER, USER_A, 'pest_c'),
+    (err: unknown) => err instanceof garden.GardenClaimError && err.code === 'not_visitable',
+  );
+  await assert.rejects(
+    () => garden.smashGardenPest(USER_B, USER_A, 'no_such_pest'),
+    (err: unknown) => err instanceof garden.GardenClaimError && err.code === 'no_pest',
+  );
+});
+
+test('smash hits the same daily visit cap of 5', async () => {
+  const today = shanghaiToday();
+  await query('DELETE FROM garden_visit_daily WHERE visitor_id = $1', [USER_B]);
+  await query('DELETE FROM garden_dew_claims WHERE visitor_id = $1', [USER_B]);
+  const pests = [0, 1, 2, 3, 4, 5].map((slot) => samplePest(`cap_${slot}`, slot));
+  await garden.upsertUserGarden(USER_A, {
+    plants: [{ plotIndex: 0, seedId: 'moon_lily' }, { plotIndex: 1, seedId: 'moon_lily' }],
+    overflowDew: 0,
+    overflowDewDay: today,
+    pests,
+    pestSpawnDay: today,
+    pestsReplace: true,
+  });
+  for (let i = 0; i < garden.GARDEN_DEW_VISIT_DAILY_MAX; i++) {
+    const r = await garden.smashGardenPest(USER_B, USER_A, `cap_${i}`);
+    assert.equal(r.earned, garden.GARDEN_PEST_SMASH_SE);
+    assert.equal(r.visits, i + 1);
+  }
+  await assert.rejects(
+    () => garden.smashGardenPest(USER_B, USER_A, 'cap_5'),
+    (err: unknown) => err instanceof garden.GardenClaimError && err.code === 'daily_capped',
+  );
+  const left = await garden.getUserGarden(USER_A);
+  assert.equal(left?.pests.some((p) => p.id === 'cap_5'), true);
 });
