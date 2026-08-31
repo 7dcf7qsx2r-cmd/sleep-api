@@ -7,6 +7,7 @@ import {
   IotBindError,
   bindIotDevice,
   getOwnedIotLatest,
+  invokeOwnedIotCommand,
   listBoundIotDevices,
   listOwnedIotMessages,
   unbindIotDevice,
@@ -24,9 +25,10 @@ function requireUser(c: { get: (key: 'auth') => { sub: string; type: string } })
 
 const snParam = z.string().min(3).max(64);
 
-function bindErrorStatus(err: IotBindError): 400 | 404 | 409 {
+function bindErrorStatus(err: IotBindError): 400 | 404 | 409 | 503 {
   if (err.code === 'already_bound') return 409;
   if (err.code === 'not_found' || err.code === 'not_bound') return 404;
+  if (err.code === 'unavailable') return 503;
   return 400;
 }
 
@@ -125,3 +127,36 @@ iotRoutes.delete('/devices/:sn', async (c) => {
     throw err;
   }
 });
+
+iotRoutes.post(
+  '/devices/:sn/command',
+  zValidator(
+    'json',
+    z.object({
+      productKey: z.string().min(1).max(64).optional(),
+      service: z.string().min(1).max(64),
+      params: z.record(z.unknown()).default({}),
+    }),
+  ),
+  async (c) => {
+    const userId = requireUser(c);
+    if (!userId) return c.json({ error: 'guest_not_allowed', message: '请先登录后再控制设备' }, 403);
+    const sn = c.req.param('sn');
+    const body = c.req.valid('json');
+    try {
+      const result = await invokeOwnedIotCommand({
+        userId,
+        sn,
+        productKey: body.productKey,
+        service: body.service,
+        params: body.params,
+      });
+      return c.json({ ok: true, ...result });
+    } catch (err) {
+      if (err instanceof IotBindError) {
+        return c.json({ error: err.code, message: err.message }, bindErrorStatus(err));
+      }
+      throw err;
+    }
+  },
+);

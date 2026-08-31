@@ -93,4 +93,65 @@ describe('iot bind', { concurrency: false }, () => {
       (err: unknown) => err instanceof iot.IotBindError && err.code === 'not_found',
     );
   });
+
+  test('only the bound account can invoke, and payload is published', async () => {
+    const { setIotDownlinkPublisher } = await import('../src/services/iotDownlink.js');
+    await iot.bindIotDevice({ userId: USER_A, sn: '744DBD7785D4', model: 'CIS IB' });
+    const published: Array<{ productKey: string; sn: string; payload: unknown }> = [];
+    setIotDownlinkPublisher(async (input) => {
+      published.push(input);
+      return { topic: `/sys/${input.productKey}/${input.sn}/thing/service/invoke` };
+    });
+    try {
+      const result = await iot.invokeOwnedIotCommand({
+        userId: USER_A,
+        sn: '744dbd7785d4',
+        productKey: 'cis_ib',
+        service: 'socketStatus',
+        params: { status: 1 },
+      });
+      assert.equal(result.topic, '/sys/cis_ib/744DBD7785D4/thing/service/invoke');
+      assert.equal(published.length, 1);
+      assert.deepEqual(published[0]?.payload, {
+        method: 'thing.service.invoke',
+        params: { socketStatus: { status: 1 } },
+      });
+
+      await assert.rejects(
+        () => iot.invokeOwnedIotCommand({
+          userId: USER_B,
+          sn: '744DBD7785D4',
+          service: 'socketStatus',
+          params: { status: 0 },
+        }),
+        (err: unknown) => err instanceof iot.IotBindError && err.code === 'not_found',
+      );
+
+      await assert.rejects(
+        () => iot.invokeOwnedIotCommand({
+          userId: USER_A,
+          sn: '744DBD7785D4',
+          service: 'setAppInit',
+          params: {},
+        }),
+        (err: unknown) => err instanceof iot.IotBindError && err.code === 'invalid_command',
+      );
+    } finally {
+      setIotDownlinkPublisher(null);
+    }
+  });
+
+  test('CIS-IP bind prefers cis_ip even if client sends xiaomian_mvp', async () => {
+    const bound = await iot.bindIotDevice({
+      userId: USER_A,
+      sn: '14639369CE28',
+      model: 'CIS-IP',
+      productKey: 'xiaomian_mvp',
+    });
+    assert.equal(bound.productKey, 'cis_ip');
+    const listed = await iot.listBoundIotDevices(USER_A);
+    const pillow = listed.filter((d) => d.sn === '14639369CE28');
+    assert.equal(pillow.length, 1);
+    assert.equal(pillow[0]?.productKey, 'cis_ip');
+  });
 });

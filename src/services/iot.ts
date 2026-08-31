@@ -1,4 +1,6 @@
 import { query } from '../db/client.js';
+import { validateCisServiceCommand } from './iotCommands.js';
+import { IotDownlinkError, publishIotDownlink } from './iotDownlink.js';
 
 export const DEFAULT_IOT_PRODUCT_KEY = 'xiaomian_mvp';
 
@@ -36,7 +38,14 @@ export function isValidIotSn(input: string): boolean {
 
 export class IotBindError extends Error {
   constructor(
-    public readonly code: 'invalid_sn' | 'invalid_model' | 'already_bound' | 'not_found' | 'not_bound',
+    public readonly code:
+      | 'invalid_sn'
+      | 'invalid_model'
+      | 'already_bound'
+      | 'not_found'
+      | 'not_bound'
+      | 'invalid_command'
+      | 'unavailable',
     message: string,
   ) {
     super(message);
@@ -103,10 +112,10 @@ export async function bindIotDevice(input: {
     model = normalizeCisModel(existing.rows[0].model);
   }
   const productKey = (
-    input.productKey?.trim()
+    productKeyForCisModel(model)
+    || input.productKey?.trim()
     || existing.rows[0]?.product_key
     || registered.rows[0]?.product_key
-    || productKeyForCisModel(model)
     || DEFAULT_IOT_PRODUCT_KEY
   );
   const alias = input.alias?.trim() || null;
@@ -120,6 +129,11 @@ export async function bindIotDevice(input: {
        model = COALESCE(EXCLUDED.model, iot_device_bindings.model),
        bound_at = NOW()`,
     [productKey, sn, input.userId, alias, model],
+  );
+  await query(
+    `DELETE FROM iot_device_bindings
+     WHERE user_id = $1 AND sn = $2 AND product_key <> $3`,
+    [input.userId, sn, productKey],
   );
 
   const listed = await listBoundIotDevices(input.userId);
@@ -181,14 +195,20 @@ export async function listBoundIotDevices(userId: string): Promise<IotBinding[]>
 }
 
 async function assertOwned(userId: string, sn: string, productKey?: string): Promise<void> {
+  if (productKey) {
+    const { rows } = await query<{ user_id: string }>(
+      `SELECT user_id FROM iot_device_bindings WHERE product_key = $1 AND sn = $2`,
+      [productKey, sn],
+    );
+    if (rows[0]?.user_id === userId) return;
+  }
   const { rows } = await query<{ user_id: string }>(
-    productKey
-      ? `SELECT user_id FROM iot_device_bindings WHERE product_key = $1 AND sn = $2`
-      : `SELECT user_id FROM iot_device_bindings WHERE sn = $1`,
-    productKey ? [productKey, sn] : [sn],
+    `SELECT user_id FROM iot_device_bindings WHERE sn = $1`,
+    [sn],
   );
-  if (!rows[0]) throw new IotBindError('not_found', '未绑定该设备');
-  if (rows[0].user_id !== userId) throw new IotBindError('not_found', '未绑定该设备');
+  if (!rows[0] || rows[0].user_id !== userId) {
+    throw new IotBindError('not_found', '未绑定该设备');
+  }
 }
 
 export async function getOwnedIotLatest(
@@ -259,4 +279,58 @@ export async function listOwnedIotMessages(
     raw: row.raw_json,
     receivedAt: row.received_at.toISOString(),
   }));
+}
+
+export async function invokeOwnedIotCommand(input: {
+  userId: string;
+  sn: string;
+  productKey?: string;
+  service: string;
+  params: Record<string, unknown>;
+}): Promise<{ topic: string; service: string; payload: unknown }> {
+  const sn = normalizeIotSn(input.sn);
+  if (!isValidIotSn(sn)) {
+    throw new IotBindError('invalid_sn', '设备 SN 无效');
+  }
+  const service = input.service.trim();
+  if (!service) {
+    throw new IotBindError('invalid_command', '缺少服务名');
+  }
+  await assertOwned(input.userId, sn, input.productKey);
+  const { rows } = await query<{ product_key: string; model: string | null }>(
+    `SELECT product_key, model FROM iot_device_bindings
+     WHERE sn = $1 AND user_id = $2
+     ORDER BY CASE WHEN product_key IN ('cis_ib', 'cis_iswb', 'cis_ip') THEN 0 ELSE 1 END
+     LIMIT 1`,
+    [sn, input.userId],
+  );
+  const binding = rows[0];
+  if (!binding) {
+    throw new IotBindError('not_found', '未绑定该设备');
+  }
+  const fromModel = productKeyForCisModel(binding.model);
+  const fromInput = input.productKey === 'cis_ib' || input.productKey === 'cis_iswb' || input.productKey === 'cis_ip'
+    ? input.productKey
+    : null;
+  if (fromInput && fromModel && fromInput !== fromModel) {
+    throw new IotBindError('invalid_command', '设备型号不匹配');
+  }
+  const productKey = fromModel || fromInput || binding.product_key;
+  const validated = validateCisServiceCommand(productKey, service, input.params);
+  if (!validated.ok) {
+    throw new IotBindError('invalid_command', validated.message);
+  }
+  try {
+    const published = await publishIotDownlink({
+      productKey,
+      sn,
+      payload: validated.payload,
+    });
+    return { topic: published.topic, service, payload: validated.payload };
+  } catch (err) {
+    if (err instanceof IotDownlinkError) {
+      throw new IotBindError(err.code === 'unavailable' ? 'unavailable' : 'invalid_command', err.message);
+    }
+    throw err;
+  }
 }

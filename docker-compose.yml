@@ -8,6 +8,8 @@ services:
     container_name: sleep-api
     env_file:
       - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8787:8787"
     volumes:
@@ -39,6 +41,8 @@ services:
       - SMS_SEND_INTERVAL_SEC=${SMS_SEND_INTERVAL_SEC:-60}
       - WECHAT_APP_ID=${WECHAT_APP_ID}
       - WECHAT_APP_SECRET=${WECHAT_APP_SECRET}
+      - MQTT_CONTROL_URL=${MQTT_CONTROL_URL:-http://host.docker.internal:8790}
+      - MQTT_ADMIN_TOKEN=${MQTT_ADMIN_TOKEN}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:8787/health', (r) => r.statusCode === 200 ? process.exit(0) : process.exit(1))"]

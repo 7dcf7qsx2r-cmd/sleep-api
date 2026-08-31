@@ -97,6 +97,10 @@ export const config = {
     'https://xmianai.com',
     'https://www.xmianai.com',
   ]),
+  mqttControl: {
+    url: process.env.MQTT_CONTROL_URL?.trim() ?? '',
+    adminToken: process.env.MQTT_ADMIN_TOKEN?.trim() ?? '',
+  },
 };
 
 export function assertProductionConfig(): void {
