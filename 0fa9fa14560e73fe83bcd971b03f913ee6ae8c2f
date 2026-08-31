@@ -1,0 +1,30 @@
+src/db/migrate.ts
+  4c5b675c683fbb53 728-741
+src/routes/garden.ts
+  4c5b675c683fbb53 11,13,24-31,36-43,52-57,66-69,82-95,111-118,153,169-184
+tests/garden-visit.test.ts
+  4c5b675c683fbb53 88-90,93-100,221-335
+src/services/garden.ts
+  4c5b675c683fbb53 4,11,14-17,25-34,41-44,54,59-65,71-73,75-110,113,123-126,131-133,143-167,174-177,189-196,198-220,226-228,230-240,246-247,309,313,331,338,374,544-674
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "0fa9fa14560e73fe83bcd971b03f913ee6ae8c2f",
+  "prompts": {
+    "4c5b675c683fbb53": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9b8d194a-3b07-4f5a-b48c-7554b28d133f",
+        "model": "grok-4.6"
+      },
+      "human_author": "pengjun5437513 <cunminjia@qq.com>",
+      "messages": [],
+      "total_additions": 505,
+      "total_deletions": 40,
+      "accepted_lines": 504,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/bb3815ecf8f817e8a894620806e12a9a887ac9a95bc11082dfcea7869d416fc9"
+    }
+  }
+}
