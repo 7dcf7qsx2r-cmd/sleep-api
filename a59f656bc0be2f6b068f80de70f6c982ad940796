@@ -1,0 +1,46 @@
+.github/workflows/deploy-production.yml
+  4c5b675c683fbb53 60-61
+src/routes/health.ts
+  4c5b675c683fbb53 21
+src/services/iotDownlink.ts
+  4c5b675c683fbb53 1-70
+tests/iot-bind.test.ts
+  4c5b675c683fbb53 96-156
+.env.example
+  4c5b675c683fbb53 63-68
+src/services/iotCommands.ts
+  4c5b675c683fbb53 1-200
+scripts/ci/render-dotenv.sh
+  4c5b675c683fbb53 49-50
+docker-compose.yml
+  4c5b675c683fbb53 11-12,44-45
+src/config.ts
+  4c5b675c683fbb53 100-103
+src/services/iot.ts
+  4c5b675c683fbb53 2-3,41-48,115-116,133-137,198-204,206-207,209-211,283-336
+tests/iot-command.test.ts
+  4c5b675c683fbb53 1-73
+src/routes/iot.ts
+  4c5b675c683fbb53 10,28,31,130-162
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "a59f656bc0be2f6b068f80de70f6c982ad940796",
+  "prompts": {
+    "4c5b675c683fbb53": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9b8d194a-3b07-4f5a-b48c-7554b28d133f",
+        "model": "grok-4.6"
+      },
+      "human_author": "pengjun5437513 <cunminjia@qq.com>",
+      "messages": [],
+      "total_additions": 691,
+      "total_deletions": 160,
+      "accepted_lines": 542,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/4f1f6072eb3ff4e327c0484344f91ba4761ac358c3ec5fc19d3a2f9b26e48bb0"
+    }
+  }
+}
