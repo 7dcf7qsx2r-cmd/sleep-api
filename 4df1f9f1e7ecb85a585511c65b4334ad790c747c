@@ -1,0 +1,28 @@
+src/services/auth.ts
+  4c5b675c683fbb53 3,205-242
+tests/account-delete.test.ts
+  4c5b675c683fbb53 1-142
+src/routes/auth.ts
+  4c5b675c683fbb53 4,358-369
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "4df1f9f1e7ecb85a585511c65b4334ad790c747c",
+  "prompts": {
+    "4c5b675c683fbb53": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9b8d194a-3b07-4f5a-b48c-7554b28d133f",
+        "model": "grok-4.6"
+      },
+      "human_author": "pengjun5437513 <cunminjia@qq.com>",
+      "messages": [],
+      "total_additions": 200,
+      "total_deletions": 8,
+      "accepted_lines": 194,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/9da1e032df537a58eb672087731130e8beef4d67797b886c53fe755a282a5395"
+    }
+  }
+}
