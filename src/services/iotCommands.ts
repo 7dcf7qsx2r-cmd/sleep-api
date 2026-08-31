@@ -78,7 +78,7 @@ function validateServiceParams(
       if (productKey === "cis_ib") {
         return {
           num: intField(params.num, 1, 8, "num"),
-          pressure: numField(params.pressure, 0, 20_000, "pressure"),
+          pressure: numField(params.pressure, 1000, 8000, "pressure"),
         };
       }
       if (productKey === "cis_iswb") {
@@ -103,7 +103,7 @@ function validateServiceParams(
           status: flag01(params.status, "status"),
           sensitivity: intField(params.sensitivity, 3, 9, "sensitivity"),
           bedSide: flag01(params.bedSide, "bedSide"),
-          height: intField(params.height, 0, 3150, "height"),
+          height: intField(params.height, 0, 2300, "height"),
         };
       }
       return { snoreStatus: flag01(params.snoreStatus, "snoreStatus") };
@@ -169,8 +169,23 @@ function validateServiceParams(
         endhour: intField(params.endhour, 0, 23, "endhour"),
         endminute: intField(params.endminute, 0, 59, "endminute"),
       };
-    case "setRegularTime":
-      return params;
+    case "setRegularTime": {
+      if (productKey !== "cis_ib") return params;
+      const week = params.weekDayTime;
+      if (!Array.isArray(week) || week.length < 9) {
+        throw new Error("weekDayTime 须含星期与时刻");
+      }
+      const weekDayTime = week.slice(0, 9).map((value, index) => {
+        if (index < 7) return flag01(value, `weekDayTime[${index}]`);
+        if (index === 7) return intField(value, 0, 23, "hour");
+        return intField(value, 0, 59, "minute");
+      });
+      return {
+        weekDayTime,
+        enable: flag01(params.enable, "enable"),
+        bedSide: flag01(params.bedSide ?? 0, "bedSide"),
+      };
+    }
     default:
       throw new Error(`不支持 ${service}`);
   }

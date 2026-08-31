@@ -71,3 +71,53 @@ test('vendor field names are preserved on downlink', () => {
   assert.equal(ipPressure.ok, true);
   assert.equal(validateCisServiceCommand('cis_ip', 'setPressure', { num: 0, pressure: 8001 }).ok, false);
 });
+
+test('IB snore height and pressure follow vendor limits', () => {
+  assert.equal(validateCisServiceCommand('cis_ib', 'setSnoreStatus', {
+    status: 1,
+    sensitivity: 3,
+    bedSide: 0,
+    height: 2850,
+  }).ok, false);
+  const snore = validateCisServiceCommand('cis_ib', 'setSnoreStatus', {
+    status: 1,
+    sensitivity: 3,
+    bedSide: 0,
+    height: 2300,
+  });
+  assert.equal(snore.ok, true);
+  if (snore.ok) {
+    assert.deepEqual(snore.payload.params.setSnoreStatus, {
+      status: 1,
+      sensitivity: 3,
+      bedSide: 0,
+      height: 2300,
+    });
+  }
+  assert.equal(validateCisServiceCommand('cis_ib', 'setPressure', { num: 1, pressure: 0 }).ok, false);
+  const pressure = validateCisServiceCommand('cis_ib', 'setPressure', { num: 1, pressure: 1000 });
+  assert.equal(pressure.ok, true);
+});
+
+test('IB setRegularTime validates weekday clock array', () => {
+  const ok = validateCisServiceCommand('cis_ib', 'setRegularTime', {
+    weekDayTime: [0, 1, 1, 1, 1, 1, 0, 7, 0],
+    enable: 1,
+    bedSide: 0,
+  });
+  assert.equal(ok.ok, true);
+  if (ok.ok) {
+    assert.deepEqual(ok.payload.params.setRegularTime, {
+      weekDayTime: [0, 1, 1, 1, 1, 1, 0, 7, 0],
+      enable: 1,
+      bedSide: 0,
+    });
+  }
+  assert.equal(validateCisServiceCommand('cis_ib', 'setRegularTime', {
+    weekDayTime: [1, 1],
+    enable: 1,
+    bedSide: 0,
+  }).ok, false);
+  const ip = validateCisServiceCommand('cis_ip', 'setRegularTime', { enable: 1 });
+  assert.equal(ip.ok, true);
+});
