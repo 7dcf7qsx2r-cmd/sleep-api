@@ -245,6 +245,20 @@ describe('iot bind', { concurrency: false }, () => {
     }
   });
 
+  test('unbind drops CIS binding even if client sends the default productKey', async () => {
+    const sn = 'CISUNBIND0001';
+    await iot.bindIotDevice({ userId: USER_A, sn, model: 'CIS-IP' });
+    const before = await iot.listBoundIotDevices(USER_A);
+    assert.equal(before.some((d) => d.sn === sn && d.productKey === 'cis_ip'), true);
+
+    await iot.unbindIotDevice(USER_A, sn, 'xiaomian_mvp');
+
+    const after = await iot.listBoundIotDevices(USER_A);
+    assert.equal(after.some((d) => d.sn === sn), false);
+    const rebound = await iot.bindIotDevice({ userId: USER_B, sn, model: 'CIS-IP' });
+    assert.equal(rebound.productKey, 'cis_ip');
+  });
+
   test('CIS-IP bind prefers cis_ip even if client sends xiaomian_mvp', async () => {
     const bound = await iot.bindIotDevice({
       userId: USER_A,

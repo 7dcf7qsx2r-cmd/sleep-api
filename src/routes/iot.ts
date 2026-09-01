@@ -116,9 +116,8 @@ iotRoutes.delete('/devices/:sn', async (c) => {
   const userId = requireUser(c);
   if (!userId) return c.json({ error: 'guest_not_allowed', message: '请先登录' }, 403);
   const sn = c.req.param('sn');
-  const productKey = c.req.query('productKey') || DEFAULT_IOT_PRODUCT_KEY;
   try {
-    await unbindIotDevice(userId, sn, productKey);
+    await unbindIotDevice(userId, sn);
     return c.json({ ok: true });
   } catch (err) {
     if (err instanceof IotBindError) {

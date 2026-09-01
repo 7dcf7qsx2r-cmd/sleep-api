@@ -153,18 +153,12 @@ export async function bindIotDevice(input: {
   };
 }
 
-export async function unbindIotDevice(userId: string, sn: string, productKey?: string): Promise<void> {
+export async function unbindIotDevice(userId: string, sn: string, _productKey?: string): Promise<void> {
   const id = normalizeIotSn(sn);
-  const params = productKey
-    ? [userId, id, productKey]
-    : [userId, id];
   const { rowCount } = await query(
-    productKey
-      ? `DELETE FROM iot_device_bindings
-         WHERE user_id = $1 AND sn = $2 AND product_key = $3`
-      : `DELETE FROM iot_device_bindings
-         WHERE user_id = $1 AND sn = $2`,
-    params,
+    `DELETE FROM iot_device_bindings
+     WHERE user_id = $1 AND sn = $2`,
+    [userId, id],
   );
   if (rowCount === 0) {
     throw new IotBindError('not_bound', '未绑定该设备');
