@@ -1,0 +1,24 @@
+src/routes/ai.ts
+  4c5b675c683fbb53 1004-1010,1012,1014-1017,1019,1021-1025,1030-1038,1042-1047,1049,1062-1064,1069,1071-1075,1083-1086,1089,1094
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7",
+  "base_commit_sha": "25e80df0af7ed9f439f2865c73ed8718bfad0f23",
+  "prompts": {
+    "4c5b675c683fbb53": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9b8d194a-3b07-4f5a-b48c-7554b28d133f",
+        "model": "grok-4.6"
+      },
+      "human_author": "pengjun5437513 <cunminjia@qq.com>",
+      "messages": [],
+      "total_additions": 49,
+      "total_deletions": 62,
+      "accepted_lines": 49,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/100017cdb265c103120d19f3ef5b47455ade4aff0ab49d55831f4ce6df646dd2"
+    }
+  }
+}
