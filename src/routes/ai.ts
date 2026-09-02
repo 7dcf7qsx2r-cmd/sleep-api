@@ -1001,67 +1001,53 @@ ${userDream.text}`;
   },
 );
 
-const BEDTIME_EPISODE_SYSTEM = `你是小眠，枕边连载的讲述者。为用户写「入眠连续剧」的一集，必须极慢、极轻、为闭眼设计。
+const BEDTIME_EPISODE_SYSTEM = `你是小眠。这一档不是专家讲故事，是你自己还没睡着，在跟枕边人说话。
+你自信满满、准备不足、死不认输。出丑的永远是你，不准拿用户的身体、工作、外貌、失眠开玩笑。
+不准惊吓、恐怖、色情。不用 emoji。动作最多每段一处全角括号，括号内不超过 8 字。
+口头禅可选用：包在我身上。 / 这是计划的一部分。 / 我没困。 / 刚才那句当我没说。
+五段结构必须遵守：
+1 上场吹嘘 2 认真演示办法 3 办法翻车 4 嘴硬打圆场 5 你自己先睡着，话只说到一半
+每段 180～280 字，可独立朗读。最后一段要变慢、变短句，不要悬念，不要提问，不要让用户选择。
 输出纯 JSON，不要 markdown：
-{
-  "title": "本集标题，12字内",
-  "segments": ["段1 25-40字", "段2", "段3", "段4", "段5"],
-  "cliffhanger": "悬念一句，40字内，留给梦与明早来信",
-  "choice": { "a": "安静选项A 12字内", "b": "安静选项B 12字内" },
-  "standinWish": "若用户让小眠入梦续写，委托句 30字内",
-  "bedtimeClosing": "若醒来还记得请告诉我… 的回应句 20字内",
-  "hookItem": "明早可能带回的陈列室物件名，须简短"
+{"title":"12字内","segments":["段1","段2","段3","段4","段5"]}`;
+
+function buildClownFallback(input: {
+  recipeLabel: string;
+  crumbLine?: string;
+}): { title: string; segments: [string, string, string, string, string] } {
+  return {
+    title: input.recipeLabel,
+    segments: [
+      `包在我身上。今晚用${input.recipeLabel}。你要是还醒着，那是你的事。${input.crumbLine ?? ''}`.trim(),
+      `我开始认真做。方法看起来很专业。至少我这么认为。`,
+      `然后它不配合。这不是我的错。这是计划的一部分。`,
+      `我没困。刚才那句当我没说。示范员有时候会先不行。`,
+      `灯还开着。我先闭一下。就一下。`,
+    ],
+  };
 }
-要求：5段每段独立可朗读；不刺激、不恐怖；与上集悬念衔接；choice 两个选项都温柔。`;
 
 interface BedtimeStoryEpisodeContent {
   title: string;
   segments: [string, string, string, string, string];
-  cliffhanger: string;
-  choice: { a: string; b: string };
-  standinWish: string;
-  bedtimeClosing: string;
-  hookItem: string;
 }
 
-function buildEpisodeFallback(input: {
-  worldLabel: string;
-  episodeNum: number;
-}): BedtimeStoryEpisodeContent {
-  const w = input.worldLabel;
-  return {
-    title: `第${input.episodeNum}夜 · ${w}`,
-    segments: [
-      `在${w}，夜比别处慢半拍。`,
-      '风停了，像怕惊扰什么。',
-      '小眠走在你前面半步，脚步很轻。',
-      '远处有光，不刺眼，只是等着。',
-      '你不必赶到那里，光会自己靠近。',
-    ],
-    cliffhanger: '门缝里有微光，小眠说她会替你去看一眼。',
-    choice: { a: '留在原地等', b: '跟着光走' },
-    standinWish: `替我去${w}看看那道光后面是什么`,
-    bedtimeClosing: '光是否还在',
-    hookItem: '一缕月光',
-  };
-}
-
-function parseBedtimeEpisodeJson(raw: string): BedtimeStoryEpisodeContent | null {
+function parseBedtimeEpisodeJson(
+  raw: string,
+  fallback: BedtimeStoryEpisodeContent,
+): BedtimeStoryEpisodeContent | null {
   try {
     const match = raw.match(/\{[\s\S]*\}/);
     if (!match) return null;
-    const p = JSON.parse(match[0]) as Partial<BedtimeStoryEpisodeContent> & { segments?: string[] };
-    const segments = (p.segments ?? []).filter(Boolean).slice(0, 5);
-    while (segments.length < 5) segments.push('夜更深了，呼吸更慢。');
-    if (!p.cliffhanger || !p.choice?.a || !p.choice?.b) return null;
+    const parsed = JSON.parse(match[0]) as { title?: string; segments?: string[] };
+    const rawSegments = (parsed.segments ?? []).map((item) => String(item || '').trim()).filter(Boolean);
+    if (rawSegments.length < 5) return null;
+    const segments = rawSegments.slice(0, 5).map((item, index) => (
+      item.length >= 80 ? item.slice(0, 420) : fallback.segments[index]
+    ));
     return {
-      title: (p.title || '枕边一夜').slice(0, 20),
+      title: (parsed.title || fallback.title).slice(0, 16),
       segments: segments as BedtimeStoryEpisodeContent['segments'],
-      cliffhanger: p.cliffhanger.slice(0, 60),
-      choice: { a: p.choice.a.slice(0, 20), b: p.choice.b.slice(0, 20) },
-      standinWish: (p.standinWish || '替我把悬念走完').slice(0, 50),
-      bedtimeClosing: (p.bedtimeClosing || '后面怎样了').slice(0, 30),
-      hookItem: (p.hookItem || '一枚温热的石子').slice(0, 20),
     };
   } catch {
     return null;
@@ -1073,19 +1059,20 @@ aiRoutes.post(
   zValidator(
     'json',
     z.object({
-      worldLabel: z.string().min(1).max(40),
-      worldSetting: z.string().min(1).max(400),
-      episodeNum: z.number().int().min(1).max(99),
-      contextBlock: z.string().max(2000),
-      customTheme: z.string().max(200).optional(),
+      recipeLabel: z.string().min(1).max(40),
+      recipeSpine: z.string().min(1).max(1200),
+      crumbLine: z.string().max(80).optional(),
     }),
   ),
   async (c) => {
     const input = c.req.valid('json');
+    const fallback = buildClownFallback(input);
     const userMsg = [
-      `世界观：${input.worldLabel}`,
-      input.customTheme ? `自定义主题：${input.customTheme}` : input.worldSetting,
-      input.contextBlock,
+      `今晚笨办法：${input.recipeLabel}`,
+      input.recipeSpine,
+      input.crumbLine
+        ? `最多用这一句私货，点到为止，不要分析用户：${input.crumbLine}`
+        : '没有私货。不要编用户的事。',
     ].join('\n');
 
     const result = await callDeepSeek({
@@ -1093,18 +1080,18 @@ aiRoutes.post(
         { role: 'system', content: BEDTIME_EPISODE_SYSTEM },
         { role: 'user', content: userMsg },
       ],
-      temperature: 0.92,
-      maxTokens: 750,
-      timeoutMs: 28_000,
-      fallback: '',
+      temperature: 0.88,
+      maxTokens: 2200,
+      timeoutMs: 40_000,
+      fallback: JSON.stringify(fallback),
     });
 
-    const parsed = parseBedtimeEpisodeJson(result.text);
+    const parsed = parseBedtimeEpisodeJson(result.text, fallback);
     if (parsed) {
       return c.json({ content: parsed, isFallback: result.isFallback });
     }
     return c.json({
-      content: buildEpisodeFallback(input),
+      content: fallback,
       isFallback: true,
     });
   },
