@@ -48,6 +48,17 @@ test('vendor field names are preserved on downlink', () => {
 
   const haltAid = validateCisServiceCommand('cis_iswb', 'setAirbagsMode', { bedSide: 0, mode: 2, duration: 0 });
   assert.equal(haltAid.ok, true);
+  const curve = validateCisServiceCommand('cis_iswb', 'setAirbagsMode', { bedSide: 0, mode: 1, duration: 30 });
+  assert.equal(curve.ok, true);
+  const deep = validateCisServiceCommand('cis_iswb', 'setAirbagsMode', { bedSide: 1, mode: 3, duration: 20 });
+  assert.equal(deep.ok, true);
+  const wave = validateCisServiceCommand('cis_ib', 'setAirbagsMode', { bedSide: 0, mode: 4, duration: 15 });
+  assert.equal(wave.ok, true);
+  if (wave.ok) {
+    assert.deepEqual(wave.payload.params.setAirbagsMode, { bedSide: 0, mode: 4, duration: 15 });
+  }
+  assert.equal(validateCisServiceCommand('cis_iswb', 'setAirbagsMode', { bedSide: 0, mode: 0, duration: 10 }).ok, false);
+  assert.equal(validateCisServiceCommand('cis_iswb', 'setAirbagsMode', { bedSide: 0, mode: 6, duration: 10 }).ok, false);
 
   const range = validateCisServiceCommand('cis_ip', 'setTimeRange', {
     status: 1,

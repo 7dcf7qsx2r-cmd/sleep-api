@@ -1,7 +1,14 @@
 const CIS_PRODUCT_KEYS = new Set(["cis_ib", "cis_iswb", "cis_ip"]);
 
 export const CIS_COMMAND_WHITELIST: Record<string, ReadonlySet<string>> = {
-  cis_ib: new Set(["setPressure", "setMotor", "setSnoreStatus", "socketStatus", "setRegularTime"]),
+  cis_ib: new Set([
+    "setPressure",
+    "setMotor",
+    "setSnoreStatus",
+    "socketStatus",
+    "setRegularTime",
+    "setAirbagsMode",
+  ]),
   cis_iswb: new Set([
     "setPressure",
     "setAirbagsMode",
@@ -125,15 +132,14 @@ function validateServiceParams(
         heatingStatus: flag01(params.heatingStatus, "heatingStatus"),
         heatingLevel: intField(params.heatingLevel, 0, 2, "heatingLevel"),
       };
-    case "setAirbagsMode":
-      if (params.mode !== 2 && params.mode !== 5) {
-        throw new Error("mode 须为 2（助眠）或 5（抽气）");
-      }
+    case "setAirbagsMode": {
+      const mode = intField(params.mode, 1, 5, "mode");
       return {
         bedSide: flag01(params.bedSide, "bedSide"),
-        mode: params.mode,
+        mode,
         duration: intField(params.duration, 0, 180, "duration"),
       };
+    }
     case "setMemoryPressure":
       return {
         bedSide: flag01(params.bedSide, "bedSide"),
