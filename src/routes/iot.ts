@@ -12,6 +12,8 @@ import {
   listOwnedIotMessages,
   unbindIotDevice,
 } from '../services/iot.js';
+import { getOwnedSleepEpochs, getOwnedSleepSummary } from '../services/iotSleepEpochs.js';
+import { sleepNightDate } from '../utils/civilDate.js';
 
 export const iotRoutes = new Hono<{ Variables: AuthVariables }>();
 
@@ -81,6 +83,44 @@ iotRoutes.get('/devices/:sn/latest', async (c) => {
     const latest = await getOwnedIotLatest(userId, sn, productKey);
     if (!latest) return c.json({ error: 'no_data', message: '暂无上报数据' }, 404);
     return c.json(latest);
+  } catch (err) {
+    if (err instanceof IotBindError) {
+      return c.json({ error: err.code, message: err.message }, bindErrorStatus(err));
+    }
+    throw err;
+  }
+});
+
+iotRoutes.get('/devices/:sn/sleep-epochs', async (c) => {
+  const userId = requireUser(c);
+  if (!userId) return c.json({ error: 'guest_not_allowed', message: '请先登录' }, 403);
+  const sn = c.req.param('sn');
+  const nightDate = c.req.query('nightDate') || sleepNightDate();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(nightDate)) {
+    return c.json({ error: 'invalid_date', message: 'nightDate 需为 YYYY-MM-DD' }, 400);
+  }
+  try {
+    const epochs = await getOwnedSleepEpochs(userId, sn, nightDate);
+    return c.json({ sn: sn.toUpperCase(), nightDate, epochs });
+  } catch (err) {
+    if (err instanceof IotBindError) {
+      return c.json({ error: err.code, message: err.message }, bindErrorStatus(err));
+    }
+    throw err;
+  }
+});
+
+iotRoutes.get('/devices/:sn/sleep-summary', async (c) => {
+  const userId = requireUser(c);
+  if (!userId) return c.json({ error: 'guest_not_allowed', message: '请先登录' }, 403);
+  const sn = c.req.param('sn');
+  const nightDate = c.req.query('nightDate') || sleepNightDate();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(nightDate)) {
+    return c.json({ error: 'invalid_date', message: 'nightDate 需为 YYYY-MM-DD' }, 400);
+  }
+  try {
+    const summary = await getOwnedSleepSummary(userId, sn, nightDate);
+    return c.json({ summary });
   } catch (err) {
     if (err instanceof IotBindError) {
       return c.json({ error: err.code, message: err.message }, bindErrorStatus(err));

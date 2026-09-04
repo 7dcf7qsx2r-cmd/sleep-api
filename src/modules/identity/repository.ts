@@ -108,6 +108,8 @@ function buildUserFilterClause(
       OR u.phone ILIKE $${idx}
       OR p.nickname ILIKE $${idx}
       OR u.id::text ILIKE $${idx}
+      OR u.wechat_openid ILIKE $${idx}
+      OR u.wechat_unionid ILIKE $${idx}
     )`;
     params.push(q);
     idx += 1;

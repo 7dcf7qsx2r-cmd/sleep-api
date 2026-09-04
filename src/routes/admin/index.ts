@@ -8,11 +8,13 @@ import { adminExpertRoutes } from './experts.js';
 import { adminOperationRoutes } from './operations.js';
 import { adminUploadRoutes } from './uploads.js';
 import { adminVoiceMetricsRoutes } from './voiceMetrics.js';
+import { adminIotWatchRoutes } from './iotWatch.js';
 
 export const adminRoutes = new Hono();
 
 adminRoutes.get('/health', (c) => c.json({ ok: true, app: 'sleep-admin-api' }));
 
+adminRoutes.route('/iot-watch', adminIotWatchRoutes);
 adminRoutes.route('/auth', adminAuthRoutes);
 adminRoutes.route('/users', adminUserRoutes);
 adminRoutes.route('/products', adminProductRoutes);

@@ -29,3 +29,18 @@ export function toDateOnly(value: string | Date | null | undefined): string | nu
 }
 
 export const SHANGHAI_TODAY_SQL = `((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Shanghai')::date)`;
+
+export function shanghaiHour(now = new Date()): number {
+  const hour = new Intl.DateTimeFormat('en-GB', {
+    timeZone: SHANGHAI,
+    hour: '2-digit',
+    hourCycle: 'h23',
+  }).format(now);
+  return Number.parseInt(hour, 10);
+}
+
+/** 睡眠归属日：上海时间 12:00 前算当天早晨那一夜，12:00 起算下一夜。 */
+export function sleepNightDate(at = new Date()): string {
+  const date = shanghaiToday(at);
+  return shanghaiHour(at) < 12 ? date : addCivilDays(date, 1);
+}

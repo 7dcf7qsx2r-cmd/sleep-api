@@ -96,6 +96,7 @@ export const config = {
   allowedOrigins: csvEnv('CORS_ALLOWED_ORIGINS', [
     'https://xmianai.com',
     'https://www.xmianai.com',
+    'https://admin.xmianai.com',
   ]),
   mqttControl: {
     url: process.env.MQTT_CONTROL_URL?.trim() ?? '',
