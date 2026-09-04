@@ -1,0 +1,54 @@
+tests/iot-watch.test.ts
+  4c5b675c683fbb53 1-108
+src/modules/identity/repository.ts
+  4c5b675c683fbb53 111-112
+src/services/iotSleepEpochMath.ts
+  4c5b675c683fbb53 1-246
+deploy/nginx/admin.xmianai.com.conf
+  4c5b675c683fbb53 15-21
+src/index.ts
+  4c5b675c683fbb53 5,27-30
+src/config.ts
+  4c5b675c683fbb53 99
+src/services/iotWatch.ts
+  4c5b675c683fbb53 1-285
+src/routes/admin/index.ts
+  4c5b675c683fbb53 11,17
+src/db/iotSchema.ts
+  4c5b675c683fbb53 39,54-99
+src/utils/civilDate.ts
+  4c5b675c683fbb53 32-46
+src/services/iotSleepEpochs.ts
+  4c5b675c683fbb53 1-563
+src/routes/iot.ts
+  4c5b675c683fbb53 15-16,94-131
+src/routes/admin/iotWatchPage.ts
+  4c5b675c683fbb53 1-409
+src/routes/admin/iotWatch.ts
+  4c5b675c683fbb53 1-115
+tests/iot-sleep-epoch.test.ts
+  4c5b675c683fbb53 1-280
+src/services/iotSleepEstimate.ts
+  4c5b675c683fbb53 1-207
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7",
+  "base_commit_sha": "45dcfdbd5a2e11ee129addb609fd221e071a427f",
+  "prompts": {
+    "4c5b675c683fbb53": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9b8d194a-3b07-4f5a-b48c-7554b28d133f",
+        "model": "grok-4.6"
+      },
+      "human_author": "pengjun5437513 <cunminjia@qq.com>",
+      "messages": [],
+      "total_additions": 2372,
+      "total_deletions": 40,
+      "accepted_lines": 2332,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/e911a841074704f9cac15e0cea02c8381ff959d1a40e96257a692db2c1ce3d10"
+    }
+  }
+}
