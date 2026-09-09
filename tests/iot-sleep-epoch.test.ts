@@ -238,8 +238,9 @@ describe('cis_ip sleep estimate', () => {
     assert.equal(got.sleepStart, new Date(start).toISOString());
     assert.equal(got.sleepEnd, new Date(start + 60 * EPOCH_MS).toISOString());
     assert.equal(got.durationMinutes, 30);
-    assert.equal(got.deepMinutes, 20);
-    assert.equal(got.lightMinutes, 10);
+    // 分期不可信门控:cis_ip 目前深睡并入「睡眠中」(light),不虚报深睡;总时长不受影响
+    assert.equal(got.deepMinutes, 0);
+    assert.equal(got.lightMinutes, 30);
     assert.equal(got.remMinutes, 0);
     assert.equal(got.awakeMinutes, 0);
     assert.equal(got.awakenings, 0);

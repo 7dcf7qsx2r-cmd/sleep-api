@@ -16,6 +16,19 @@ export const MOTION_AWAKE = 0.35;
 export const MOTION_DEEP_MAX = 0.1;
 export const DEEP_STREAK_MAX_EPOCHS = 40;
 
+/**
+ * 分期(深/浅/REM)可信门控。
+ * 现阶段三类设备仅有「体动」单一特征，压力差在安静时段大量归零(实测某夜在枕 epoch 有 60%+ 体动恰为 0),
+ * 无法可靠区分深睡/浅睡,REM 亦未建模。分期可信之前(需引入心率/呼吸变异特征),
+ * 将整段睡眠合并为单一「睡眠中」桶:deep=0、light=总睡眠 epoch,总时长/起止/夜醒/体征不受影响。
+ * 后续任一设备完成分期标定后,把对应项改为 true 即自动放开。
+ */
+export const STAGING_RELIABLE: Record<SleepProductKey, boolean> = {
+  cis_ip: false,
+  cis_ib: false,
+  cis_iswb: false,
+};
+
 export type SleepConfidence = 'low' | 'medium' | 'high';
 
 export interface PillowSleepEstimate {
@@ -204,6 +217,13 @@ export function estimatePillowSleep(
       light += 1;
       deepStreak = 0;
     }
+  }
+
+  // 分期可信门控:不可信时把深睡并入「睡眠中」(light),避免向用户呈现虚高深睡;总睡眠 epoch 数不变
+  const stagingReliable = STAGING_RELIABLE[source] ?? false;
+  if (!stagingReliable) {
+    light = deep + light;
+    deep = 0;
   }
 
   const lastSleep = ordered[Math.max(onsetIdx, wakeIdx - 1)]!;
