@@ -1,0 +1,26 @@
+src/services/iotSleepEstimate.ts
+  4c5b675c683fbb53 19-31,221-227
+tests/iot-sleep-epoch.test.ts
+  4c5b675c683fbb53 241-243
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7",
+  "base_commit_sha": "90bb1633c7728ead1ffbef6a455b623980d8d579",
+  "prompts": {
+    "4c5b675c683fbb53": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9b8d194a-3b07-4f5a-b48c-7554b28d133f",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "pengjun5437513 <cunminjia@qq.com>",
+      "messages": [],
+      "total_additions": 23,
+      "total_deletions": 2,
+      "accepted_lines": 23,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/ddc092dbf3cbb59c6522b15071097e5bb5f4c0009ecb225c1b702b1b0c834852"
+    }
+  }
+}
