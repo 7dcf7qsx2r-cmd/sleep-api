@@ -1,0 +1,32 @@
+src/services/iotSleepEstimate.ts
+  4c5b675c683fbb53 5,11-12,34,74-88,96-101,134-138,154,232
+tests/iot-sleep-epoch.test.ts
+  4c5b675c683fbb53 11,13,97,118,120,125-144,168-226,279-307
+src/services/iotSleepEpochMath.ts
+  4c5b675c683fbb53 4,12-44,165-276,303-317,320-321,324-325,345,361-363,399,404
+scripts/recompute-night-check.ts
+  4c5b675c683fbb53 1-119
+src/services/iotSleepEpochs.ts
+  4c5b675c683fbb53 7,9,12-14,16,102-111,113-135,137-138,164,186,191,219,238-242,270,287-292,294-295,311-315,320-321,340,357,362,369,377-378,385,396,398-399,403,496,585,606
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7",
+  "base_commit_sha": "81492ed271e9efa4fb88de150e5b7b5ac524a9a4",
+  "prompts": {
+    "4c5b675c683fbb53": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9b8d194a-3b07-4f5a-b48c-7554b28d133f",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "pengjun5437513 <cunminjia@qq.com>",
+      "messages": [],
+      "total_additions": 549,
+      "total_deletions": 67,
+      "accepted_lines": 515,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/c69088396e55d3cc8824c8832435d7b967e1c599e2daa6deb10f96d85092dbfd"
+    }
+  }
+}
