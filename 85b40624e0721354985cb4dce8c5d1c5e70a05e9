@@ -1,0 +1,30 @@
+src/services/iotSleepEpochs.ts
+  4c5b675c683fbb53 21,502,521-522,526-535,583,609
+scripts/probe-depth-series.ts
+  4c5b675c683fbb53 1-39
+tests/iot-sleep-epoch.test.ts
+  4c5b675c683fbb53 18,394-442
+src/services/iotSleepDepth.ts
+  4c5b675c683fbb53 1-120
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7",
+  "base_commit_sha": "85b40624e0721354985cb4dce8c5d1c5e70a05e9",
+  "prompts": {
+    "4c5b675c683fbb53": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9b8d194a-3b07-4f5a-b48c-7554b28d133f",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "pengjun5437513 <cunminjia@qq.com>",
+      "messages": [],
+      "total_additions": 445,
+      "total_deletions": 3,
+      "accepted_lines": 225,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/c16c7ea79d616eee329c6d93bbb7821c82e6064c47f4a72a4eeb4f25628cee65"
+    }
+  }
+}
