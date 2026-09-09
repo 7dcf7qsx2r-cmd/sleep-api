@@ -16,7 +16,7 @@ import {
 } from '../src/services/iotSleepEpochMath.js';
 import { estimatePillowSleep } from '../src/services/iotSleepEstimate.js';
 import { computeSleepDepthSeries } from '../src/services/iotSleepDepth.js';
-import { sleepNightDate } from '../src/utils/civilDate.js';
+import { sleepDisplayNightDate, sleepNightDate } from '../src/utils/civilDate.js';
 
 const dataDir = mkdtempSync(join(tmpdir(), 'sleep-api-epoch-'));
 process.env.USE_PGLITE = '1';
@@ -62,6 +62,12 @@ describe('cis_ip epoch math', () => {
     assert.equal(sleepNightDate(new Date('2026-09-04T03:59:00.000Z')), '2026-09-04');
     assert.equal(sleepNightDate(new Date('2026-09-04T04:00:00.000Z')), '2026-09-05');
     assert.equal(sleepNightDate(new Date('2026-09-04T08:28:00.000Z')), '2026-09-05');
+  });
+
+  test('sleepDisplayNightDate shows last completed night after noon', () => {
+    // 上海 23:00 → sleepNightDate=次日，展示应回落到昨夜
+    assert.equal(sleepDisplayNightDate(new Date('2026-09-09T15:00:00.000Z')), '2026-09-09');
+    assert.equal(sleepDisplayNightDate(new Date('2026-09-09T03:00:00.000Z')), '2026-09-09');
   });
 
   test('off-pillow zeros are not a heart rate of 0', () => {

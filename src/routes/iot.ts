@@ -13,7 +13,7 @@ import {
   unbindIotDevice,
 } from '../services/iot.js';
 import { getOwnedSleepEpochs, getOwnedSleepSummary } from '../services/iotSleepEpochs.js';
-import { sleepNightDate } from '../utils/civilDate.js';
+import { sleepDisplayNightDate } from '../utils/civilDate.js';
 
 export const iotRoutes = new Hono<{ Variables: AuthVariables }>();
 
@@ -95,7 +95,7 @@ iotRoutes.get('/devices/:sn/sleep-epochs', async (c) => {
   const userId = requireUser(c);
   if (!userId) return c.json({ error: 'guest_not_allowed', message: '请先登录' }, 403);
   const sn = c.req.param('sn');
-  const nightDate = c.req.query('nightDate') || sleepNightDate();
+  const nightDate = c.req.query('nightDate') || sleepDisplayNightDate();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(nightDate)) {
     return c.json({ error: 'invalid_date', message: 'nightDate 需为 YYYY-MM-DD' }, 400);
   }
@@ -114,7 +114,7 @@ iotRoutes.get('/devices/:sn/sleep-summary', async (c) => {
   const userId = requireUser(c);
   if (!userId) return c.json({ error: 'guest_not_allowed', message: '请先登录' }, 403);
   const sn = c.req.param('sn');
-  const nightDate = c.req.query('nightDate') || sleepNightDate();
+  const nightDate = c.req.query('nightDate') || sleepDisplayNightDate();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(nightDate)) {
     return c.json({ error: 'invalid_date', message: 'nightDate 需为 YYYY-MM-DD' }, 400);
   }

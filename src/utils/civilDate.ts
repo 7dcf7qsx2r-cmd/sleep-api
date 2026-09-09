@@ -44,3 +44,13 @@ export function sleepNightDate(at = new Date()): string {
   const date = shanghaiToday(at);
   return shanghaiHour(at) < 12 ? date : addCivilDays(date, 1);
 }
+
+/**
+ * 用户查看「昨夜睡眠」时应查的归属日（最近已结束或正在结束的那一夜）。
+ * 中午前 = sleepNightDate（刚起床，看的就是今早结束的这一夜）；
+ * 中午后 = sleepNightDate - 1 天（晚间「昨夜」指今早结束的那一夜，而非尚未入睡的下一夜标签）。
+ */
+export function sleepDisplayNightDate(at = new Date()): string {
+  const label = sleepNightDate(at);
+  return shanghaiHour(at) < 12 ? label : addCivilDays(label, -1);
+}
