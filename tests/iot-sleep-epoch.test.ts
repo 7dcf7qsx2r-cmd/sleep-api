@@ -8,7 +8,9 @@ import {
   aggregateTickGroups,
   epochStartMs,
   extractPillowTick,
+  extractReport,
   extractSleepReport,
+  extractTick,
   type PillowTick,
   type SleepEpoch,
 } from '../src/services/iotSleepEpochMath.js';
@@ -92,7 +94,7 @@ describe('cis_ip epoch math', () => {
     assert.equal(got.nightDate, '2026-09-05');
   });
 
-  test('in-bed heart/breath ignore person=0 samples and use SleepReport moving floor', () => {
+  test('in-bed heart/breath ignore person=0 samples; unreliable moving flag no longer floors motion', () => {
     const start = Date.parse('2026-09-04T18:14:00.000Z');
     const ticks: PillowTick[] = [];
     for (let i = 0; i < 30; i += 1) {
@@ -113,10 +115,31 @@ describe('cis_ip epoch math', () => {
     assert.equal(got.inBedRatio, 29 / 30);
     assert.equal(got.hrMean, 62);
     assert.equal(got.brMean, 14);
+    // movingFlag 仍被记录，但 cis_ip movingFloor=0 → 不再把安静睡眠强抬到 0.5 清醒级
     assert.equal(got.movingFlag, 1);
-    assert.ok(got.motion >= 0.5);
+    assert.ok(got.motion < 0.1, `安静在枕不应因 moving=1 被抬升 (实际 ${got.motion})`);
     assert.equal(got.snoreCount, 2);
     assert.equal(got.snoreDbMax, 38);
+  });
+
+  test('physiological pressure jitter is not counted as body motion (baseline subtraction)', () => {
+    const start = Date.parse('2026-09-04T18:20:00.000Z');
+    const ticks: PillowTick[] = [];
+    // 右气囊每秒抖动 ~12Pa（呼吸/心搏），左气囊 ~2Pa —— 属安静睡眠底噪
+    for (let i = 0; i < 30; i += 1) {
+      ticks.push(
+        tick(start + i * 1000, {
+          person: 1,
+          heart: 65,
+          breathing: 15,
+          pressureLeft: 550 + (i % 2) * 2,
+          pressureRight: 1510 + (i % 2) * 12,
+        }),
+      );
+    }
+    const got = aggregatePillowEpoch(start, ticks);
+    // 旧实现 raw≈14 /80 = 0.175（压在入睡门槛 0.2）；新实现扣除 16Pa 底噪 → ~0
+    assert.ok(got.motion < 0.05, `生理底噪不应算作体动 (实际 ${got.motion})`);
   });
 
   test('realtime snoreStatus is not a snore count', () => {
@@ -139,6 +162,65 @@ describe('cis_ip epoch math', () => {
   test('epochStart floors to 30s', () => {
     const t = Date.parse('2026-09-04T08:28:17.000Z');
     assert.equal(epochStartMs(t), Date.parse('2026-09-04T08:28:00.000Z'));
+  });
+});
+
+describe('multi-device tick/report extraction (cis_ib / cis_iswb)', () => {
+  const at = Date.parse('2026-09-04T18:00:00.000Z');
+
+  test('cis_ib mattress: airbagsPerson occupancy + HR + zone pressure', () => {
+    const raw = {
+      params: {
+        HR: [63, 15, 0, 0, 0, 0], // 左：心率63 呼吸15；右：无人全0
+        airbagsPerson: [1, 2], // 左有人(1)，右无人(2)
+        airbagsPressure: [510, 505, 512, 508, 40, 41, 39, 42], // 左半在压，右半空
+      },
+    };
+    const t = extractTick('cis_ib', '/sys/cis_ib/AAA/thing/property/post', raw, at);
+    assert.ok(t);
+    assert.equal(t.person, 1);
+    assert.equal(t.heart, 63);
+    assert.equal(t.breathing, 15);
+    assert.ok(t.pressureLeft != null && t.pressureLeft > t.pressureRight!);
+  });
+
+  test('cis_ib mattress: unoccupied bed yields person=0', () => {
+    const raw = { params: { HR: [0, 0, 0, 0, 0, 0], airbagsPerson: [2, 2], airbagsPressure: [40, 41, 39, 42, 40, 41, 39, 42] } };
+    const t = extractTick('cis_ib', '/sys/cis_ib/AAA/thing/property/post', raw, at);
+    assert.ok(t);
+    assert.equal(t.person, 0);
+  });
+
+  test('cis_iswb lumbar mattress: heartData occupancy + L/R pressure', () => {
+    const raw = {
+      params: {
+        heartData: [66, 16, 0, 0, 0, 0],
+        pressureLeft: 620,
+        pressureRight: 90,
+      },
+    };
+    const t = extractTick('cis_iswb', '/sys/cis_iswb/BBB/thing/property/post', raw, at);
+    assert.ok(t);
+    assert.equal(t.person, 1);
+    assert.equal(t.heart, 66);
+    assert.equal(t.breathing, 16);
+    assert.equal(t.pressureLeft, 620);
+    assert.equal(t.pressureRight, 90);
+  });
+
+  test('cis_iswb report exposes moving flag from ISWBSleepReport', () => {
+    const raw = { params: { ISWBSleepReport: [1, 0, 16, 66, 1, 0, 0, 0, 0, 0] } };
+    const report = extractReport('cis_iswb', raw, at);
+    assert.ok(report);
+    assert.equal(report.moving, 1);
+  });
+
+  test('cis_ip path is unchanged through the generic dispatcher', () => {
+    const raw = { params: { deviceStatus: { person: 1, heart: 60, breathing: 14, pressureLeft: 7000, pressureRight: 7000 } } };
+    const t = extractTick('cis_ip', '/sys/cis_ip/CCC/thing/property/post', raw, at);
+    assert.ok(t);
+    assert.equal(t.heart, 60);
+    assert.equal(t.person, 1);
   });
 });
 
@@ -193,6 +275,35 @@ describe('cis_ip sleep estimate', () => {
     assert.equal(got.awakenings, 1);
     assert.equal(got.awakeMinutes, 4);
     assert.equal(got.durationMinutes, 16);
+  });
+
+  test('16-min toilet trip mid-night is WASO, session continues after re-entry (续夜)', () => {
+    const start = Date.parse('2026-09-04T16:00:00.000Z');
+    const epochs: SleepEpoch[] = [];
+    const push = (n: number, inBed: boolean) => {
+      for (let k = 0; k < n; k += 1) {
+        epochs.push(
+          epoch(start + epochs.length * EPOCH_MS, {
+            inBedRatio: inBed ? 1 : 0,
+            hrMean: inBed ? 62 : null,
+            brMean: inBed ? 14 : null,
+            motion: inBed ? 0.05 : 0.04,
+          }),
+        );
+      }
+    };
+    push(40, true); // 入睡 + 睡眠
+    push(32, false); // 起夜 16 分钟（> 旧的 10 分钟起床阈值）
+    push(40, true); // 重新上床继续睡
+    push(20, false); // 早晨最终起床
+    const gapEnd = 40 + 32 + 40; // 最后一个在枕 epoch 之后
+
+    const got = estimatePillowSleep(epochs, '2026-09-05');
+    // 旧实现会在 06:xx 的 32-epoch 起夜处截断，丢弃后 40 个在枕 epoch
+    assert.equal(got.sleepEnd, new Date(start + gapEnd * EPOCH_MS).toISOString());
+    assert.equal(got.durationMinutes, 40, '两段在枕都应计入睡眠时长');
+    assert.equal(got.awakeMinutes, 16, '中途起夜计为觉醒');
+    assert.ok(got.awakenings >= 1);
   });
 });
 

@@ -2,11 +2,14 @@ import {
   EPOCH_MS,
   QUALITY_MIN_SAMPLES,
   type SleepEpoch,
+  type SleepProductKey,
 } from './iotSleepEpochMath.js';
 
 export const IN_BED_RATIO = 0.8;
 export const ONSET_EPOCHS = 30;
 export const WAKE_OFF_BED_EPOCHS = 20;
+/** 中途离枕若之后仍有 ≥ 该数量的在枕 epoch，则视为夜间起夜(WASO)而非最终起床 → 续夜 */
+export const REENTRY_INBED_EPOCHS = 20;
 export const WASO_EPOCHS = 6;
 export const MOTION_SLEEP_MAX = 0.2;
 export const MOTION_AWAKE = 0.35;
@@ -28,7 +31,7 @@ export interface PillowSleepEstimate {
   avgHeartRate: number | null;
   avgBreathRate: number | null;
   confidence: SleepConfidence;
-  source: 'cis_ip';
+  source: SleepProductKey;
 }
 
 function isUsable(epoch: SleepEpoch): boolean {
@@ -68,6 +71,21 @@ function findOnsetIndex(epochs: SleepEpoch[]): number {
   return -1;
 }
 
+function countInBedFrom(epochs: SleepEpoch[], from: number): number {
+  let count = 0;
+  for (let i = from; i < epochs.length; i += 1) {
+    if (isInBedEpoch(epochs[i]!)) count += 1;
+  }
+  return count;
+}
+
+/**
+ * 最终起床点。
+ * 一段离枕达到 WAKE_OFF_BED_EPOCHS(10min) 只是「候选」：
+ *  - 若其后仍有足够的在枕 epoch（如厕/起夜后重新上床）→ 判为夜间起夜(WASO)，继续找 → 续夜
+ *  - 若其后再无实质在枕 → 判为最终起床，返回该段离枕起点
+ * 否则整夜在枕（openEnded）返回 epochs.length。
+ */
 function findWakeIndex(epochs: SleepEpoch[], onsetIdx: number): number {
   let off = 0;
   let offStart = onsetIdx;
@@ -75,7 +93,12 @@ function findWakeIndex(epochs: SleepEpoch[], onsetIdx: number): number {
     if (!isInBedEpoch(epochs[i]!)) {
       if (off === 0) offStart = i;
       off += 1;
-      if (off >= WAKE_OFF_BED_EPOCHS) return offStart;
+      if (off >= WAKE_OFF_BED_EPOCHS) {
+        if (countInBedFrom(epochs, i + 1) >= REENTRY_INBED_EPOCHS) {
+          continue; // 起夜后重新上床，续夜
+        }
+        return offStart;
+      }
     } else {
       off = 0;
     }
@@ -108,7 +131,11 @@ function markBouts(
   return awakenings;
 }
 
-export function estimatePillowSleep(epochs: SleepEpoch[], nightDate?: string): PillowSleepEstimate {
+export function estimatePillowSleep(
+  epochs: SleepEpoch[],
+  nightDate?: string,
+  source: SleepProductKey = 'cis_ip',
+): PillowSleepEstimate {
   const ordered = [...epochs].sort((a, b) => a.epochStartMs - b.epochStartMs);
   const date = nightDate ?? ordered[0]?.nightDate ?? '';
   const empty: PillowSleepEstimate = {
@@ -124,7 +151,7 @@ export function estimatePillowSleep(epochs: SleepEpoch[], nightDate?: string): P
     avgHeartRate: null,
     avgBreathRate: null,
     confidence: 'low',
-    source: 'cis_ip',
+    source,
   };
   if (!ordered.length) return empty;
 
@@ -202,6 +229,6 @@ export function estimatePillowSleep(epochs: SleepEpoch[], nightDate?: string): P
     avgHeartRate: avg(hearts),
     avgBreathRate: avg(breaths),
     confidence,
-    source: 'cis_ip',
+    source,
   };
 }

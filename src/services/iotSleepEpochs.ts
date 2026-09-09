@@ -4,12 +4,16 @@ import {
   EPOCH_MS,
   IOT_SLEEP_TTL_DAYS,
   PILLOW_PRODUCT_KEY,
+  SLEEP_PRODUCT_KEYS,
   aggregatePillowEpoch,
+  calibrationFor,
   epochIsClosed,
   epochStartMs,
-  extractPillowTick,
-  extractSleepReport,
+  extractReport,
+  extractTick,
+  isSleepProductKey,
   type SleepEpoch,
+  type SleepProductKey,
   type SleepReportOverlay,
   type PillowTick,
 } from './iotSleepEpochMath.js';
@@ -95,14 +99,43 @@ function mapEpochRow(row: {
   };
 }
 
-async function listPillowSns(): Promise<string[]> {
-  const { rows } = await query<{ sn: string }>(
-    `SELECT sn FROM iot_devices WHERE product_key = $1
+interface SleepDevice {
+  sn: string;
+  productKey: SleepProductKey;
+}
+
+async function listSleepDevices(): Promise<SleepDevice[]> {
+  const { rows } = await query<{ sn: string; product_key: string }>(
+    `SELECT d.sn, d.product_key
+       FROM iot_devices d
+      WHERE d.product_key = ANY($1)
      UNION
-     SELECT sn FROM iot_sleep_epoch_cursor`,
-    [PILLOW_PRODUCT_KEY],
+     SELECT c.sn, COALESCE(d.product_key, $2) AS product_key
+       FROM iot_sleep_epoch_cursor c
+       LEFT JOIN iot_devices d ON d.sn = c.sn`,
+    [SLEEP_PRODUCT_KEYS as unknown as string[], PILLOW_PRODUCT_KEY],
   );
-  return [...new Set(rows.map((r) => r.sn))];
+  const map = new Map<string, SleepProductKey>();
+  for (const row of rows) {
+    const pk = isSleepProductKey(row.product_key) ? row.product_key : PILLOW_PRODUCT_KEY;
+    // iot_devices 的真实 productKey 优先于游标兜底
+    if (!map.has(row.sn) || isSleepProductKey(row.product_key)) map.set(row.sn, pk);
+  }
+  return [...map.entries()].map(([sn, productKey]) => ({ sn, productKey }));
+}
+
+async function resolveProductKey(sn: string): Promise<SleepProductKey> {
+  const { rows } = await query<{ product_key: string }>(
+    `SELECT product_key FROM iot_devices WHERE sn = $1`,
+    [sn],
+  );
+  if (isSleepProductKey(rows[0]?.product_key)) return rows[0]!.product_key as SleepProductKey;
+  const { rows: er } = await query<{ product_key: string }>(
+    `SELECT product_key FROM iot_sleep_epochs WHERE sn = $1 LIMIT 1`,
+    [sn],
+  );
+  if (isSleepProductKey(er[0]?.product_key)) return er[0]!.product_key as SleepProductKey;
+  return PILLOW_PRODUCT_KEY;
 }
 
 async function cursorFor(sn: string): Promise<number> {
@@ -128,6 +161,7 @@ async function saveCursor(sn: string, lastMessageId: number): Promise<void> {
 
 async function loadWindowMessages(
   sn: string,
+  productKey: SleepProductKey,
   fromMs: number,
   toMs: number,
 ): Promise<Array<{
@@ -149,12 +183,12 @@ async function loadWindowMessages(
        AND received_at >= $3::timestamptz
        AND received_at < $4::timestamptz
      ORDER BY received_at ASC, id ASC`,
-    [sn, PILLOW_PRODUCT_KEY, new Date(fromMs).toISOString(), new Date(toMs).toISOString()],
+    [sn, productKey, new Date(fromMs).toISOString(), new Date(toMs).toISOString()],
   );
   return rows;
 }
 
-async function upsertEpoch(sn: string, epoch: SleepEpoch): Promise<void> {
+async function upsertEpoch(sn: string, productKey: SleepProductKey, epoch: SleepEpoch): Promise<void> {
   await query(
     `INSERT INTO iot_sleep_epochs (
        sn, epoch_start, product_key, night_date, sample_count, in_bed_ratio,
@@ -182,7 +216,7 @@ async function upsertEpoch(sn: string, epoch: SleepEpoch): Promise<void> {
     [
       sn,
       new Date(epoch.epochStartMs).toISOString(),
-      PILLOW_PRODUCT_KEY,
+      productKey,
       epoch.nightDate,
       epoch.sampleCount,
       epoch.inBedRatio,
@@ -201,7 +235,11 @@ async function upsertEpoch(sn: string, epoch: SleepEpoch): Promise<void> {
   );
 }
 
-async function upsertSession(sn: string, estimate: PillowSleepEstimate): Promise<void> {
+async function upsertSession(
+  sn: string,
+  productKey: SleepProductKey,
+  estimate: PillowSleepEstimate,
+): Promise<void> {
   await query(
     `INSERT INTO iot_sleep_sessions (
        sn, night_date, product_key, sleep_start, sleep_end,
@@ -229,7 +267,7 @@ async function upsertSession(sn: string, estimate: PillowSleepEstimate): Promise
     [
       sn,
       estimate.nightDate,
-      PILLOW_PRODUCT_KEY,
+      productKey,
       estimate.sleepStart,
       estimate.sleepEnd,
       estimate.durationMinutes,
@@ -246,10 +284,15 @@ async function upsertSession(sn: string, estimate: PillowSleepEstimate): Promise
   );
 }
 
-export async function recomputePillowNight(sn: string, nightDate: string): Promise<PillowSleepEstimate> {
+export async function recomputePillowNight(
+  sn: string,
+  nightDate: string,
+  productKey?: SleepProductKey,
+): Promise<PillowSleepEstimate> {
+  const pk = productKey ?? await resolveProductKey(sn);
   const epochs = await listSleepEpochs(sn, nightDate);
-  const estimate = estimatePillowSleep(epochs, nightDate);
-  await upsertSession(sn, estimate);
+  const estimate = estimatePillowSleep(epochs, nightDate, pk);
+  await upsertSession(sn, pk, estimate);
   return estimate;
 }
 
@@ -265,11 +308,17 @@ export async function purgeExpiredSleepEpochs(): Promise<void> {
   );
 }
 
-export async function catchUpPillowSleepEpochs(sn: string, nowMs = Date.now()): Promise<{
+export async function catchUpPillowSleepEpochs(
+  sn: string,
+  nowMs = Date.now(),
+  productKey?: SleepProductKey,
+): Promise<{
   epochs: number;
   advancedTo: number | null;
 }> {
   const id = normalizeIotSn(sn);
+  const pk = productKey ?? await resolveProductKey(id);
+  const cal = calibrationFor(pk);
   let wrote = 0;
   let advancedTo: number | null = null;
   for (let batch = 0; batch < CATCHUP_MAX_BATCHES; batch += 1) {
@@ -288,7 +337,7 @@ export async function catchUpPillowSleepEpochs(sn: string, nowMs = Date.now()): 
          AND received_at > NOW() - INTERVAL '${TTL_INTERVAL}'
        ORDER BY id ASC
        LIMIT $4`,
-      [id, PILLOW_PRODUCT_KEY, cursor, CATCHUP_BATCH],
+      [id, pk, cursor, CATCHUP_BATCH],
     );
     if (!rows.length) break;
 
@@ -305,19 +354,19 @@ export async function catchUpPillowSleepEpochs(sn: string, nowMs = Date.now()): 
 
     const minStart = Math.min(...closedEpochs);
     const maxEnd = Math.max(...closedEpochs) + EPOCH_MS;
-    const window = await loadWindowMessages(id, minStart - LOOKBACK_MS, maxEnd);
+    const window = await loadWindowMessages(id, pk, minStart - LOOKBACK_MS, maxEnd);
     const ticksByEpoch = new Map<number, PillowTick[]>();
     const reports: SleepReportOverlay[] = [];
     for (const row of window) {
       const atMs = receivedAtMs(row.received_at);
-      const tick = extractPillowTick(row.topic, row.raw_json, atMs);
+      const tick = extractTick(pk, row.topic, row.raw_json, atMs);
       if (tick) {
         const start = epochStartMs(tick.atMs);
         const list = ticksByEpoch.get(start);
         if (list) list.push(tick);
         else ticksByEpoch.set(start, [tick]);
       }
-      const report = extractSleepReport(row.raw_json, atMs);
+      const report = extractReport(pk, row.raw_json, atMs);
       if (report) reports.push(report);
     }
 
@@ -325,15 +374,15 @@ export async function catchUpPillowSleepEpochs(sn: string, nowMs = Date.now()): 
     for (const start of closedEpochs) {
       const ticks = ticksByEpoch.get(start) ?? [];
       if (!ticks.length) continue;
-      const epoch = aggregatePillowEpoch(start, ticks, reports);
-      await upsertEpoch(id, epoch);
+      const epoch = aggregatePillowEpoch(start, ticks, reports, cal);
+      await upsertEpoch(id, pk, epoch);
       nightDates.add(epoch.nightDate);
       wrote += 1;
     }
     await saveCursor(id, lastClosedId);
     advancedTo = lastClosedId;
     for (const nightDate of nightDates) {
-      await recomputePillowNight(id, nightDate);
+      await recomputePillowNight(id, nightDate, pk);
     }
     if (rows.length < CATCHUP_BATCH) break;
   }
@@ -344,14 +393,14 @@ export async function catchUpIotSleepEpochs(): Promise<{ sns: number; epochs: nu
   if (catchUpRunning) return { sns: 0, epochs: 0 };
   catchUpRunning = true;
   try {
-    const sns = await listPillowSns();
+    const devices = await listSleepDevices();
     let epochs = 0;
-    for (const sn of sns) {
-      const result = await catchUpPillowSleepEpochs(sn);
+    for (const device of devices) {
+      const result = await catchUpPillowSleepEpochs(device.sn, Date.now(), device.productKey);
       epochs += result.epochs;
     }
     await purgeExpiredSleepEpochs();
-    return { sns: sns.length, epochs };
+    return { sns: devices.length, epochs };
   } finally {
     catchUpRunning = false;
   }
@@ -444,7 +493,7 @@ export async function getSleepSession(sn: string, nightDate: string): Promise<Pi
     avgHeartRate: row.avg_heart_rate == null ? null : Number(row.avg_heart_rate),
     avgBreathRate: row.avg_breath_rate == null ? null : Number(row.avg_breath_rate),
     confidence: row.confidence === 'medium' || row.confidence === 'high' ? row.confidence : 'low',
-    source: 'cis_ip',
+    source: isSleepProductKey(row.source) ? row.source : PILLOW_PRODUCT_KEY,
     computedAt: new Date(row.computed_at).toISOString(),
   };
 }
@@ -533,7 +582,7 @@ export async function getOwnedSleepSummary(
     const estimate = await recomputePillowNight(id, nightDate);
     session = {
       sn: id,
-      productKey: PILLOW_PRODUCT_KEY,
+      productKey: estimate.source,
       computedAt: new Date().toISOString(),
       ...estimate,
     };
@@ -554,7 +603,7 @@ export async function getWatchSleepSummary(sn: string, nightDate: string) {
     const estimate = await recomputePillowNight(id, nightDate);
     session = {
       sn: id,
-      productKey: PILLOW_PRODUCT_KEY,
+      productKey: estimate.source,
       computedAt: new Date().toISOString(),
       ...estimate,
     };
