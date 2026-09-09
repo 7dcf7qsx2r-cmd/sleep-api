@@ -18,6 +18,7 @@ import {
   type PillowTick,
 } from './iotSleepEpochMath.js';
 import { estimatePillowSleep, type PillowSleepEstimate } from './iotSleepEstimate.js';
+import { computeSleepDepthSeries } from './iotSleepDepth.js';
 import { toDateOnly } from '../utils/civilDate.js';
 
 const CATCHUP_BATCH = 5_000;
@@ -498,7 +499,7 @@ export async function getSleepSession(sn: string, nightDate: string): Promise<Pi
   };
 }
 
-export function serializeSleepEpoch(row: SleepEpochRow) {
+export function serializeSleepEpoch(row: SleepEpochRow, depth: number | null = null) {
   return {
     sn: row.sn,
     productKey: row.productKey,
@@ -517,7 +518,19 @@ export function serializeSleepEpoch(row: SleepEpochRow) {
     snoreDbMax: round1(row.snoreDbMax),
     movingFlag: row.movingFlag,
     quality: row.quality,
+    /** 睡眠深度指数 0–100（夜内自归一化，低置信）；null=离床/信号不足 */
+    sleepDepth: depth,
   };
+}
+
+/**
+ * 序列化整夜 epoch，并附加夜内自归一化的睡眠深度指数曲线。
+ * 深度需要整夜分布，故在此按 sn 内一次性计算再逐 epoch 贴回。
+ */
+export function serializeSleepEpochsWithDepth(rows: SleepEpochRow[]) {
+  const depthByStart = new Map<number, number | null>();
+  for (const p of computeSleepDepthSeries(rows)) depthByStart.set(p.epochStartMs, p.depth);
+  return rows.map((row) => serializeSleepEpoch(row, depthByStart.get(row.epochStartMs) ?? null));
 }
 
 export function serializeSleepSession(session: PillowSleepSession) {
@@ -567,7 +580,7 @@ export async function getOwnedSleepEpochs(
   const id = requireSn(sn);
   await assertOwned(userId, id);
   const rows = await listSleepEpochs(id, nightDate);
-  return rows.map(serializeSleepEpoch);
+  return serializeSleepEpochsWithDepth(rows);
 }
 
 export async function getOwnedSleepSummary(
@@ -593,7 +606,7 @@ export async function getOwnedSleepSummary(
 export async function getWatchSleepEpochs(sn: string, nightDate: string) {
   const id = requireSn(sn);
   const rows = await listSleepEpochs(id, nightDate);
-  return rows.map(serializeSleepEpoch);
+  return serializeSleepEpochsWithDepth(rows);
 }
 
 export async function getWatchSleepSummary(sn: string, nightDate: string) {

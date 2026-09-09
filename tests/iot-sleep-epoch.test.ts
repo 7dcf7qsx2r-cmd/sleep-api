@@ -15,6 +15,7 @@ import {
   type SleepEpoch,
 } from '../src/services/iotSleepEpochMath.js';
 import { estimatePillowSleep } from '../src/services/iotSleepEstimate.js';
+import { computeSleepDepthSeries } from '../src/services/iotSleepDepth.js';
 import { sleepNightDate } from '../src/utils/civilDate.js';
 
 const dataDir = mkdtempSync(join(tmpdir(), 'sleep-api-epoch-'));
@@ -388,5 +389,54 @@ describe('cis_ip epoch catch-up', { concurrency: false }, () => {
        WHERE sn = '14639369CCDC' AND epoch_start < NOW() - INTERVAL '3 days'`,
     );
     assert.equal(leftover.rows[0]?.n, 0);
+  });
+});
+
+describe('sleep depth index (v1 · 低置信)', () => {
+  const base = Date.parse('2026-09-04T16:00:00.000Z');
+
+  test('平静(低hrStd)比活跃(高hrStd)更沉；离床断开；体动觉醒封顶', () => {
+    const es: SleepEpoch[] = [];
+    // 38 个在枕平静 epoch，hrStd 从 1 单调升到 4（夜内有分层）
+    for (let i = 0; i < 38; i += 1) {
+      es.push(epoch(base + i * EPOCH_MS, { hrStd: 1 + (3 * i) / 37, motion: 0.05 }));
+    }
+    const offBed = epoch(base + 38 * EPOCH_MS, {
+      inBedRatio: 0,
+      quality: 'low',
+      hrStd: null,
+      motion: 0,
+    });
+    const awake = epoch(base + 39 * EPOCH_MS, { motion: 0.6, hrStd: 3 });
+    const series = computeSleepDepthSeries([...es, offBed, awake]);
+
+    assert.equal(series.length, 40);
+    // 深(早、低hrStd) > 浅(晚、高hrStd)，且都非空
+    assert.ok(series[3]!.depth != null && series[34]!.depth != null);
+    assert.ok(series[3]!.depth! > series[34]!.depth!);
+    assert.ok(series[3]!.depth! > 50); // 最沉段应显著抬高
+    // 离床 → null（曲线断开）
+    assert.equal(series[38]!.depth, null);
+    // 在枕体动觉醒 → 封顶为很浅
+    assert.ok(series[39]!.depth != null && series[39]!.depth! <= 15);
+  });
+
+  test('动态范围过窄(hrStd 无差异) → 整夜 null，不画曲线', () => {
+    const es: SleepEpoch[] = [];
+    for (let i = 0; i < 30; i += 1) {
+      es.push(epoch(base + i * EPOCH_MS, { hrStd: 2, motion: 0.05 }));
+    }
+    const series = computeSleepDepthSeries(es);
+    assert.equal(series.length, 30);
+    assert.ok(series.every((p) => p.depth === null));
+  });
+
+  test('有效样本过少(<20) → 整夜 null', () => {
+    const es: SleepEpoch[] = [];
+    for (let i = 0; i < 10; i += 1) {
+      es.push(epoch(base + i * EPOCH_MS, { hrStd: 1 + i * 0.3, motion: 0.05 }));
+    }
+    const series = computeSleepDepthSeries(es);
+    assert.ok(series.every((p) => p.depth === null));
   });
 });
