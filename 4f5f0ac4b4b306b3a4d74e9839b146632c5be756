@@ -1,0 +1,44 @@
+src/lib/alipay.ts
+  4c5b675c683fbb53 1-151
+src/config.ts
+  4c5b675c683fbb53 105-111
+.env.example
+  4c5b675c683fbb53 69-74
+src/services/shop.ts
+  4c5b675c683fbb53 1,3,5-12,405-604
+src/routes/shop.ts
+  4c5b675c683fbb53 6-9,20-33,79-126
+.github/workflows/deploy-uat.yml
+  4c5b675c683fbb53 60-63
+src/db/migrate.ts
+  4c5b675c683fbb53 174-176
+.github/workflows/deploy-production.yml
+  4c5b675c683fbb53 62-65
+tests/alipay.test.ts
+  4c5b675c683fbb53 1-69
+secrets/local/production.env.example
+  4c5b675c683fbb53 29-32
+scripts/ci/render-dotenv.sh
+  4c5b675c683fbb53 51-55
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.7",
+  "base_commit_sha": "4f5f0ac4b4b306b3a4d74e9839b146632c5be756",
+  "prompts": {
+    "4c5b675c683fbb53": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9b8d194a-3b07-4f5a-b48c-7554b28d133f",
+        "model": "grok-4.6"
+      },
+      "human_author": "pengjun5437513 <cunminjia@qq.com>",
+      "messages": [],
+      "total_additions": 533,
+      "total_deletions": 4,
+      "accepted_lines": 529,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/cc38c1b597d42e8f4f478aac4c128b9af2ecf01a6688a1cc888d5dd99b93684b"
+    }
+  }
+}
