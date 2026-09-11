@@ -57,6 +57,10 @@ jobs:
           SMS_MOCK: ${{ secrets.SMS_MOCK }}
           FCM_SERVER_KEY: ${{ secrets.FCM_SERVER_KEY }}
           FCM_PROJECT_ID: ${{ secrets.FCM_PROJECT_ID }}
+          ALIPAY_APP_ID: ${{ secrets.ALIPAY_APP_ID }}
+          ALIPAY_APP_PRIVATE_KEY: ${{ secrets.ALIPAY_APP_PRIVATE_KEY }}
+          ALIPAY_PUBLIC_KEY: ${{ secrets.ALIPAY_PUBLIC_KEY }}
+          ALIPAY_NOTIFY_URL: ${{ secrets.ALIPAY_NOTIFY_URL }}
         run: |
           chmod +x scripts/ci/render-dotenv.sh
           ./scripts/ci/render-dotenv.sh > .env.deploy

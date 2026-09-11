@@ -102,6 +102,13 @@ export const config = {
     url: process.env.MQTT_CONTROL_URL?.trim() ?? '',
     adminToken: process.env.MQTT_ADMIN_TOKEN?.trim() ?? '',
   },
+  alipay: {
+    appId: process.env.ALIPAY_APP_ID?.trim() ?? '',
+    appPrivateKey: process.env.ALIPAY_APP_PRIVATE_KEY?.trim() ?? '',
+    alipayPublicKey: process.env.ALIPAY_PUBLIC_KEY?.trim() ?? '',
+    notifyUrl: process.env.ALIPAY_NOTIFY_URL?.trim() ?? 'https://api.xmianai.com/shop/alipay/notify',
+    gateway: process.env.ALIPAY_GATEWAY?.trim() || 'https://openapi.alipay.com/gateway.do',
+  },
 };
 
 export function assertProductionConfig(): void {

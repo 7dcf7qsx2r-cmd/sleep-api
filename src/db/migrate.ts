@@ -171,6 +171,9 @@ const MIGRATION_STATEMENTS = [
   `ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS product_snapshot_json JSONB NOT NULL DEFAULT '{}'`,
   `ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS address_snapshot_json JSONB`,
   `ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+  `ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS out_trade_no TEXT`,
+  `ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS alipay_trade_no TEXT`,
+  `CREATE INDEX IF NOT EXISTS idx_shop_orders_out_trade_no ON shop_orders (out_trade_no)`,
   `CREATE TABLE IF NOT EXISTS shop_order_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     order_id UUID NOT NULL REFERENCES shop_orders(id) ON DELETE CASCADE,

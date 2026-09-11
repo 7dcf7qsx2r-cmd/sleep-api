@@ -1,5 +1,15 @@
+import { randomBytes } from 'node:crypto';
 import { query } from '../db/client.js';
+import { config } from '../config.js';
 import type { ShopProduct } from '../config/shopProducts.js';
+import {
+  buildAppPayParams,
+  isAlipayConfigured,
+  isPaidTradeStatus,
+  queryAlipayTrade,
+  toOrderString,
+  verifyAlipayNotify,
+} from '../lib/alipay.js';
 import { spendEnergy } from './energyLedger.js';
 
 interface ShopProductRow {
@@ -389,6 +399,206 @@ export async function purchaseSandboxRmb(
     product,
     account,
     sandbox: true,
+  };
+}
+
+function toCents(value: string | number): number {
+  return Math.round(Number(value) * 100);
+}
+
+function formatRmbAmount(value: number): string {
+  return (Math.round(value * 100) / 100).toFixed(2);
+}
+
+function newOutTradeNo(): string {
+  return `xm${Date.now()}${randomBytes(4).toString('hex')}`;
+}
+
+export async function createAlipayAppPayment(
+  userId: string,
+  items: Array<{ productId: string; quantity?: number }>,
+  addressSnapshot?: ShippingAddressSnapshot | null,
+) {
+  if (!isAlipayConfigured(config.alipay)) {
+    return { success: false as const, error: 'alipay_not_configured' as const };
+  }
+  if (!items.length) {
+    return { success: false as const, error: 'empty_cart' as const };
+  }
+
+  const resolved: Array<{ product: ShopProduct; quantity: number }> = [];
+  for (const item of items) {
+    const product = await getProduct(item.productId);
+    if (!product) {
+      return { success: false as const, error: 'product_not_found' as const };
+    }
+    resolved.push({
+      product,
+      quantity: Math.max(1, Math.min(item.quantity ?? 1, 99)),
+    });
+  }
+
+  const totalAmount = resolved.reduce((sum, row) => sum + row.product.rmbPrice * row.quantity, 0);
+  if (totalAmount <= 0) {
+    return { success: false as const, error: 'invalid_amount' as const };
+  }
+
+  const outTradeNo = newOutTradeNo();
+  const subject = resolved.length === 1
+    ? `${resolved[0]!.product.name}${resolved[0]!.quantity > 1 ? ` x${resolved[0]!.quantity}` : ''}`
+    : `小眠商城 ${resolved.length} 件商品`;
+  const orderIds: string[] = [];
+
+  for (const row of resolved) {
+    const inserted = await query<{ id: string }>(
+      `INSERT INTO shop_orders
+        (user_id, product_id, payment_method, quantity, rmb_amount, status,
+         product_snapshot_json, address_snapshot_json, out_trade_no)
+       VALUES ($1, $2, 'alipay', $3, $4, 'pending', $5::jsonb, $6::jsonb, $7)
+       RETURNING id`,
+      [
+        userId,
+        row.product.id,
+        row.quantity,
+        row.product.rmbPrice * row.quantity,
+        JSON.stringify(productSnapshot(row.product)),
+        JSON.stringify(normalizeAddressSnapshot(addressSnapshot)),
+        outTradeNo,
+      ],
+    );
+    const orderId = inserted.rows[0]!.id;
+    orderIds.push(orderId);
+    await writeOrderEvent({
+      orderId,
+      eventType: 'created',
+      afterStatus: 'pending',
+      actorType: 'user',
+      actorId: userId,
+      metadata: { paymentMethod: 'alipay', productId: row.product.id, quantity: row.quantity, outTradeNo },
+    });
+  }
+
+  const params = buildAppPayParams(config.alipay, {
+    outTradeNo,
+    totalAmount: formatRmbAmount(totalAmount),
+    subject: subject.slice(0, 256),
+  });
+
+  return {
+    success: true as const,
+    outTradeNo,
+    orderIds,
+    orderString: toOrderString(params),
+    totalAmount: formatRmbAmount(totalAmount),
+    subject,
+  };
+}
+
+async function markAlipayOrdersPaid(outTradeNo: string, alipayTradeNo: string | undefined, totalAmount: string | undefined) {
+  const pending = await query<{
+    id: string;
+    status: string;
+    rmb_amount: string;
+  }>(
+    `SELECT id, status, rmb_amount::text AS rmb_amount
+     FROM shop_orders
+     WHERE out_trade_no = $1`,
+    [outTradeNo],
+  );
+  if (!pending.rows.length) {
+    return { ok: false as const, error: 'order_not_found' as const };
+  }
+
+  const expectedCents = pending.rows.reduce((sum, row) => sum + toCents(row.rmb_amount), 0);
+  if (totalAmount != null && toCents(totalAmount) !== expectedCents) {
+    return { ok: false as const, error: 'amount_mismatch' as const };
+  }
+
+  const alreadyPaid = pending.rows.every((row) => row.status === 'completed');
+  if (alreadyPaid) {
+    return { ok: true as const, alreadyPaid: true, orderIds: pending.rows.map((row) => row.id) };
+  }
+
+  await query(
+    `UPDATE shop_orders
+     SET status = 'completed',
+         alipay_trade_no = COALESCE($2, alipay_trade_no),
+         updated_at = NOW()
+     WHERE out_trade_no = $1 AND status = 'pending'`,
+    [outTradeNo, alipayTradeNo ?? null],
+  );
+
+  for (const row of pending.rows) {
+    if (row.status === 'completed') continue;
+    await writeOrderEvent({
+      orderId: row.id,
+      eventType: 'paid',
+      beforeStatus: row.status,
+      afterStatus: 'completed',
+      metadata: { outTradeNo, alipayTradeNo },
+    });
+  }
+
+  return { ok: true as const, alreadyPaid: false, orderIds: pending.rows.map((row) => row.id) };
+}
+
+export async function handleAlipayNotify(payload: Record<string, string>) {
+  if (!isAlipayConfigured(config.alipay)) {
+    return { ok: false as const, error: 'alipay_not_configured' as const };
+  }
+  if (!verifyAlipayNotify(payload, config.alipay.alipayPublicKey)) {
+    return { ok: false as const, error: 'bad_sign' as const };
+  }
+  if (!isPaidTradeStatus(payload.trade_status)) {
+    return { ok: true as const, ignored: true };
+  }
+  return markAlipayOrdersPaid(payload.out_trade_no, payload.trade_no, payload.total_amount);
+}
+
+export async function confirmAlipayPayment(userId: string, outTradeNo: string) {
+  if (!isAlipayConfigured(config.alipay)) {
+    return { success: false as const, error: 'alipay_not_configured' as const };
+  }
+  const owned = await query<{ id: string; status: string }>(
+    `SELECT id, status FROM shop_orders WHERE out_trade_no = $1 AND user_id = $2`,
+    [outTradeNo, userId],
+  );
+  if (!owned.rows.length) {
+    return { success: false as const, error: 'order_not_found' as const };
+  }
+  if (owned.rows.every((row) => row.status === 'completed')) {
+    return { success: true as const, status: 'completed' as const, outTradeNo };
+  }
+
+  const queried = await queryAlipayTrade(config.alipay, outTradeNo);
+  if (queried.code === '10000' && isPaidTradeStatus(queried.tradeStatus)) {
+    const paid = await markAlipayOrdersPaid(outTradeNo, queried.tradeNo, queried.totalAmount);
+    if (!paid.ok) return { success: false as const, error: paid.error };
+    return { success: true as const, status: 'completed' as const, outTradeNo };
+  }
+
+  return {
+    success: true as const,
+    status: 'pending' as const,
+    outTradeNo,
+    alipayStatus: queried.tradeStatus ?? queried.msg,
+  };
+}
+
+export async function getAlipayPayment(userId: string, outTradeNo: string) {
+  const rows = await query<{ id: string; status: string; rmb_amount: string }>(
+    `SELECT id, status, rmb_amount::text AS rmb_amount
+     FROM shop_orders
+     WHERE out_trade_no = $1 AND user_id = $2`,
+    [outTradeNo, userId],
+  );
+  if (!rows.rows.length) return null;
+  const completed = rows.rows.every((row) => row.status === 'completed');
+  return {
+    outTradeNo,
+    status: completed ? 'completed' : 'pending',
+    orderIds: rows.rows.map((row) => row.id),
+    totalAmount: formatRmbAmount(rows.rows.reduce((sum, row) => sum + Number(row.rmb_amount), 0)),
   };
 }
 
