@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { query } from '../../db/client.js';
 import { config } from '../../config.js';
 import { sendVerificationSms, isSmsConfigured } from './tencentSms.js';
+import { isReviewSmsPhone, matchesReviewSmsCode } from './reviewAccount.js';
 
 export class SmsRateLimitError extends Error {
   constructor(message: string) {
@@ -11,48 +12,52 @@ export class SmsRateLimitError extends Error {
   }
 }
 
-function generateCode(): string {
+function generateCode(phone: string): string {
+  if (isReviewSmsPhone(phone) && config.sms.reviewCode) return config.sms.reviewCode;
   if (config.sms.mock && config.sms.mockCode) return config.sms.mockCode;
   return String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
 }
 
 export async function issueAndSendCode(phone: string, ip?: string): Promise<{ expiresIn: number }> {
-  if (!isSmsConfigured()) {
+  const reviewPhone = isReviewSmsPhone(phone);
+  if (!reviewPhone && !isSmsConfigured()) {
     throw new Error('SMS service not configured');
   }
 
-  const intervalSec = config.sms.sendIntervalSec;
-  const recent = await query<{ created_at: string }>(
-    `SELECT created_at FROM sms_verification_codes
-     WHERE phone = $1 AND created_at > NOW() - ($2 || ' seconds')::interval
-     ORDER BY created_at DESC LIMIT 1`,
-    [phone, String(intervalSec)],
-  );
-  if (recent.rows[0]) {
-    throw new SmsRateLimitError(`请 ${intervalSec} 秒后再试`);
-  }
-
-  const daily = await query<{ cnt: string }>(
-    `SELECT COUNT(*)::text AS cnt FROM sms_verification_codes
-     WHERE phone = $1 AND created_at > NOW() - interval '1 day'`,
-    [phone],
-  );
-  if (Number(daily.rows[0]?.cnt ?? 0) >= config.sms.dailyLimitPerPhone) {
-    throw new SmsRateLimitError('今日验证码发送次数已达上限');
-  }
-
-  if (ip) {
-    const ipLimit = await query<{ cnt: string }>(
-      `SELECT COUNT(*)::text AS cnt FROM sms_verification_codes
-       WHERE request_ip = $1 AND created_at > NOW() - interval '1 hour'`,
-      [ip],
+  if (!reviewPhone) {
+    const intervalSec = config.sms.sendIntervalSec;
+    const recent = await query<{ created_at: string }>(
+      `SELECT created_at FROM sms_verification_codes
+       WHERE phone = $1 AND created_at > NOW() - ($2 || ' seconds')::interval
+       ORDER BY created_at DESC LIMIT 1`,
+      [phone, String(intervalSec)],
     );
-    if (Number(ipLimit.rows[0]?.cnt ?? 0) >= config.sms.hourlyLimitPerIp) {
-      throw new SmsRateLimitError('请求过于频繁，请稍后再试');
+    if (recent.rows[0]) {
+      throw new SmsRateLimitError(`请 ${intervalSec} 秒后再试`);
+    }
+
+    const daily = await query<{ cnt: string }>(
+      `SELECT COUNT(*)::text AS cnt FROM sms_verification_codes
+       WHERE phone = $1 AND created_at > NOW() - interval '1 day'`,
+      [phone],
+    );
+    if (Number(daily.rows[0]?.cnt ?? 0) >= config.sms.dailyLimitPerPhone) {
+      throw new SmsRateLimitError('今日验证码发送次数已达上限');
+    }
+
+    if (ip) {
+      const ipLimit = await query<{ cnt: string }>(
+        `SELECT COUNT(*)::text AS cnt FROM sms_verification_codes
+         WHERE request_ip = $1 AND created_at > NOW() - interval '1 hour'`,
+        [ip],
+      );
+      if (Number(ipLimit.rows[0]?.cnt ?? 0) >= config.sms.hourlyLimitPerIp) {
+        throw new SmsRateLimitError('请求过于频繁，请稍后再试');
+      }
     }
   }
 
-  const code = generateCode();
+  const code = generateCode(phone);
   const codeHash = await bcrypt.hash(code, 10);
   const expiresAt = new Date(Date.now() + config.sms.codeTtlSec * 1000);
 
@@ -62,7 +67,9 @@ export async function issueAndSendCode(phone: string, ip?: string): Promise<{ ex
     [phone, codeHash, expiresAt.toISOString(), ip ?? null],
   );
 
-  await sendVerificationSms(phone, code);
+  if (!reviewPhone) {
+    await sendVerificationSms(phone, code);
+  }
   return { expiresIn: config.sms.codeTtlSec };
 }
 
@@ -71,6 +78,8 @@ export async function verifyCode(
   code: string,
   opts?: { consume?: boolean },
 ): Promise<boolean> {
+  if (matchesReviewSmsCode(phone, code)) return true;
+
   const consume = opts?.consume !== false;
   const row = await query<{
     id: string;

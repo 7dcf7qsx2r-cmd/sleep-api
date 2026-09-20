@@ -18,6 +18,22 @@ function csvEnv(name: string, fallback: string[]): string[] {
   return value.split(',').map((item) => item.trim()).filter(Boolean);
 }
 
+function parseReviewPhones(raw: string | undefined): string[] {
+  if (raw === '') return [];
+  const source = raw ?? '13800138000';
+  return source
+    .split(',')
+    .map((item) => item.replace(/\D/g, ''))
+    .filter((digits) => /^1[3-9]\d{9}$/.test(digits))
+    .map((digits) => `+86${digits}`);
+}
+
+function parseReviewCode(raw: string | undefined): string {
+  if (raw === '') return '';
+  const code = (raw ?? '888888').trim();
+  return /^\d{6}$/.test(code) ? code : '';
+}
+
 const databaseUrl = process.env.DATABASE_URL ?? 'postgres://sleep:sleep@localhost:5432/sleep_api';
 const nodeEnv = process.env.NODE_ENV ?? 'development';
 const jwtSecret = process.env.JWT_SECRET ?? 'dev-only-jwt-secret-change-me';
@@ -49,6 +65,9 @@ export const config = {
     region: process.env.TENCENT_SMS_REGION ?? 'ap-guangzhou',
     mock: process.env.SMS_MOCK === '1' || process.env.SMS_MOCK === 'true',
     mockCode: process.env.SMS_MOCK_CODE ?? '123456',
+    /** 应用商店审核号。REVIEW_SMS_PHONES 或 REVIEW_SMS_CODE 设为空字符串可关闭。 */
+    reviewPhones: parseReviewPhones(process.env.REVIEW_SMS_PHONES),
+    reviewCode: parseReviewCode(process.env.REVIEW_SMS_CODE),
     codeTtlSec: intEnv('SMS_CODE_TTL_SEC', 300),
     sendIntervalSec: intEnv('SMS_SEND_INTERVAL_SEC', 60),
     dailyLimitPerPhone: intEnv('SMS_DAILY_LIMIT_PER_PHONE', 10),

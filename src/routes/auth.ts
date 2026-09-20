@@ -9,6 +9,7 @@ import { verifyToken } from '../lib/jwt.js';
 import { normalizePhone, maskPhone } from '../lib/phone.js';
 import { consumeLatestCode, issueAndSendCode, SmsRateLimitError, verifyCode } from '../services/sms/codeStore.js';
 import { isSmsConfigured } from '../services/sms/tencentSms.js';
+import { isReviewSmsPhone } from '../services/sms/reviewAccount.js';
 import {
   exchangeMiniProgramCode,
   exchangeWeChatCode,
@@ -125,12 +126,12 @@ authRoutes.post(
     }),
   ),
   async (c) => {
-    if (!isSmsConfigured()) {
-      return c.json({ error: 'sms_not_configured', message: '短信服务未配置' }, 503);
-    }
     const phone = normalizePhone(c.req.valid('json').phone);
     if (!phone) {
       return c.json({ error: 'invalid_phone', message: '请输入有效的中国大陆手机号' }, 400);
+    }
+    if (!isReviewSmsPhone(phone) && !isSmsConfigured()) {
+      return c.json({ error: 'sms_not_configured', message: '短信服务未配置' }, 503);
     }
     try {
       const { expiresIn } = await issueAndSendCode(phone, clientIp(c));
