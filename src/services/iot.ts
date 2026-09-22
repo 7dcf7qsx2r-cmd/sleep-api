@@ -173,10 +173,19 @@ export async function listBoundIotDevices(userId: string): Promise<IotBinding[]>
     model: string | null;
     bound_at: Date;
     last_seen_at: Date | null;
+    property_seen_at: Date | null;
   }>(
-    `SELECT b.product_key, b.sn, b.alias, b.model, b.bound_at, d.last_seen_at
+    `SELECT b.product_key, b.sn, b.alias, b.model, b.bound_at,
+            d.last_seen_at,
+            p.received_at AS property_seen_at
      FROM iot_device_bindings b
      LEFT JOIN iot_devices d ON d.sn = b.sn
+     LEFT JOIN (
+       SELECT sn, MAX(received_at) AS received_at
+       FROM iot_messages
+       WHERE topic LIKE '%/thing/property/post' OR topic LIKE '%/up/realtime'
+       GROUP BY sn
+     ) p ON p.sn = b.sn
      WHERE b.user_id = $1
      ORDER BY b.bound_at DESC`,
     [userId],
@@ -187,8 +196,8 @@ export async function listBoundIotDevices(userId: string): Promise<IotBinding[]>
     alias: r.alias,
     model: normalizeCisModel(r.model),
     boundAt: r.bound_at.toISOString(),
-    lastSeenAt: r.last_seen_at?.toISOString() ?? null,
-    online: isOnline(r.last_seen_at),
+    lastSeenAt: (r.property_seen_at ?? r.last_seen_at)?.toISOString() ?? null,
+    online: isOnline(r.property_seen_at),
   }));
 }
 
@@ -257,13 +266,36 @@ function getLatestConfigRaw(sn: string) {
   return getLatestParamRaw(sn, `raw_json->'params'->'characteristic' IS NOT NULL`);
 }
 
-export async function getOwnedIotLatest(
-  userId: string,
-  sn: string,
-  productKey?: string,
-): Promise<IotLatestMessage | null> {
-  const id = normalizeIotSn(sn);
-  await assertOwned(userId, id, productKey);
+const REALTIME_TOPIC_FILTER = `(topic LIKE '%/thing/property/post' OR topic LIKE '%/up/realtime')`;
+
+/**
+ * 睡眠包、配置包同走 property/post，不能当作在线实时包。
+ * 三机实时字段：枕头 deviceStatus，床垫 HR/气囊/电机，撑腰垫 heartData/heatData。
+ * 与 App cisPayloadHasRealtime 保持一致。兼容根上直接带 hr 的旧报文。
+ */
+const REALTIME_BODY = `COALESCE(raw_json->'params', raw_json->'payload', raw_json)`;
+const REALTIME_ARRAY_KEYS = [
+  'airbagsPerson', 'heartData', 'airbagsPressure', 'motorHeight',
+  'motorStatus', 'airbagsMode', 'adaptive', 'snoreStatus', 'heatData',
+];
+/** HR/hr 不限类型：老 xiaomian_mvp 报文把 hr 直接放在根上且是数字。 */
+const REALTIME_SCALAR_KEYS = [
+  'HR', 'hr', 'pressureLeft', 'pressureRight', 'sleepMaxPressure',
+];
+const REALTIME_PAYLOAD_FILTER = `(
+  ${REALTIME_BODY}->'deviceStatus' IS NOT NULL
+  OR ${REALTIME_ARRAY_KEYS.map((k) => `jsonb_typeof(${REALTIME_BODY}->'${k}') = 'array'`).join('\n  OR ')}
+  OR ${REALTIME_SCALAR_KEYS.map((k) => `${REALTIME_BODY}->'${k}' IS NOT NULL`).join('\n  OR ')}
+)`;
+
+/** 与 iotWatch 一致：以 iot_messages 流水为准，避免 latest 表未同步时 App 卡在旧物模型。 */
+async function getLatestRealtimeRow(sn: string): Promise<{
+  product_key: string;
+  sn: string;
+  topic: string;
+  raw_json: unknown;
+  received_at: Date;
+} | null> {
   const { rows } = await query<{
     product_key: string;
     sn: string;
@@ -272,19 +304,25 @@ export async function getOwnedIotLatest(
     received_at: Date;
   }>(
     `SELECT product_key, sn, topic, raw_json, received_at
-     FROM iot_messages_latest
-     WHERE sn = $1
+     FROM iot_messages
+     WHERE sn = $1 AND ${REALTIME_TOPIC_FILTER} AND ${REALTIME_PAYLOAD_FILTER}
      ORDER BY
-       CASE
-         WHEN topic LIKE '%/thing/property/post' THEN 0
-         WHEN topic LIKE '%/up/realtime' THEN 1
-         ELSE 2
-       END,
+       CASE WHEN topic LIKE '%/thing/property/post' THEN 0 ELSE 1 END,
        received_at DESC
      LIMIT 1`,
-    [id],
+    [sn],
   );
-  const row = rows[0];
+  return rows[0] ?? null;
+}
+
+export async function getOwnedIotLatest(
+  userId: string,
+  sn: string,
+  productKey?: string,
+): Promise<IotLatestMessage | null> {
+  const id = normalizeIotSn(sn);
+  await assertOwned(userId, id, productKey);
+  const row = await getLatestRealtimeRow(id);
   if (!row) return null;
   const receivedAt = row.received_at.toISOString();
   const [sleep, config] = await Promise.all([
