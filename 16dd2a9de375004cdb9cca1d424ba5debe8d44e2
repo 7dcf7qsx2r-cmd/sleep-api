@@ -1,0 +1,26 @@
+tests/iot-bind.test.ts
+  4c5b675c683fbb53 142-283
+src/services/iot.ts
+  4c5b675c683fbb53 176,178-180,183-188,199-200,269-298,307-308,310,313,315-325
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.9",
+  "base_commit_sha": "16dd2a9de375004cdb9cca1d424ba5debe8d44e2",
+  "prompts": {
+    "4c5b675c683fbb53": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9b8d194a-3b07-4f5a-b48c-7554b28d133f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "pengjun5437513 <cunminjia@qq.com>",
+      "messages": [],
+      "total_additions": 242,
+      "total_deletions": 62,
+      "accepted_lines": 211,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/34c5afeacba757730e099ca528a6671574f0eca00f3547e76df1543a80f7944d"
+    }
+  }
+}
