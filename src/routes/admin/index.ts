@@ -7,6 +7,7 @@ import { adminOrderRoutes } from './orders.js';
 import { adminExpertRoutes } from './experts.js';
 import { adminOperationRoutes } from './operations.js';
 import { adminUploadRoutes } from './uploads.js';
+import { adminSleepInterventionRoutes } from './sleepIntervention.js';
 import { adminVoiceMetricsRoutes } from './voiceMetrics.js';
 import { adminIotWatchRoutes } from './iotWatch.js';
 
@@ -22,5 +23,6 @@ adminRoutes.route('/orders', adminOrderRoutes);
 adminRoutes.route('/experts', adminExpertRoutes);
 adminRoutes.route('/operations', adminOperationRoutes);
 adminRoutes.route('/uploads', adminUploadRoutes);
+adminRoutes.route('/sleep-intervention', adminSleepInterventionRoutes);
 adminRoutes.route('/voice-metrics', adminVoiceMetricsRoutes);
 adminRoutes.route('/', adminSettingsRoutes);

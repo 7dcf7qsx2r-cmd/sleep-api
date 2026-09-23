@@ -16,6 +16,7 @@ import { iotRoutes } from './routes/iot.js';
 import { adminRoutes } from './routes/admin/index.js';
 import { expertRoutes } from './routes/experts.js';
 import { contentRoutes } from './routes/content.js';
+import { sleepInterventionRoutes } from './routes/sleepIntervention.js';
 import { reportRoutes } from './routes/report.js';
 import { config } from './config.js';
 
@@ -55,6 +56,7 @@ export function createApp() {
   app.route('/iot', iotRoutes);
   app.route('/experts', expertRoutes);
   app.route('/content', contentRoutes);
+  app.route('/sleep-intervention', sleepInterventionRoutes);
   app.route('/report', reportRoutes);
   app.route('/admin', adminRoutes);
 
