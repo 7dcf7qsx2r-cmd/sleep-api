@@ -1,0 +1,38 @@
+src/services/sleepInterventionContract.ts
+  4c5b675c683fbb53 1-63
+src/routes/admin/sleepIntervention.ts
+  4c5b675c683fbb53 1-244
+src/app.ts
+  4c5b675c683fbb53 19,59
+tests/sleep-intervention.test.ts
+  4c5b675c683fbb53 1-53
+src/routes/sleepInterventionUploadPage.ts
+  4c5b675c683fbb53 1-228
+src/routes/sleepIntervention.ts
+  4c5b675c683fbb53 1-12
+src/routes/admin/index.ts
+  4c5b675c683fbb53 10,26
+src/services/sleepIntervention.ts
+  4c5b675c683fbb53 1-146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.9",
+  "base_commit_sha": "1c02e6641a8a11da1dc3c24de732f0dcd7fc1ddc",
+  "prompts": {
+    "4c5b675c683fbb53": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9b8d194a-3b07-4f5a-b48c-7554b28d133f",
+        "model": "grok-4.7"
+      },
+      "human_author": "pengjun5437513 <cunminjia@qq.com>",
+      "messages": [],
+      "total_additions": 1035,
+      "total_deletions": 219,
+      "accepted_lines": 821,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/b1f0956ebf69bc664300b57531455d8ade329597359e38c2e1c0e26a34238dd6"
+    }
+  }
+}
