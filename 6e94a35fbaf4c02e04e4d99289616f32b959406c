@@ -1,0 +1,24 @@
+src/services/operations.ts
+  4c5b675c683fbb53 122-139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.9",
+  "base_commit_sha": "6e94a35fbaf4c02e04e4d99289616f32b959406c",
+  "prompts": {
+    "4c5b675c683fbb53": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9b8d194a-3b07-4f5a-b48c-7554b28d133f",
+        "model": "grok-4.7"
+      },
+      "human_author": "pengjun5437513 <cunminjia@qq.com>",
+      "messages": [],
+      "total_additions": 7,
+      "total_deletions": 0,
+      "accepted_lines": 78,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/3e654ccd0227375c3a89f46a800327dab419627d2d96468e982eaee084c3ee2e"
+    }
+  }
+}
