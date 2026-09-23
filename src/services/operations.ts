@@ -119,6 +119,24 @@ export async function listContentItems(params: {
   return result.rows.map(mapContent);
 }
 
+export async function findContentByKey(contentKey: string) {
+  const result = await query<ContentRow>(`${contentSelect} WHERE content_key = $1`, [contentKey]);
+  return result.rows[0] ? mapContent(result.rows[0]) : null;
+}
+
+export async function findContentById(id: string) {
+  const result = await query<ContentRow>(`${contentSelect} WHERE id = $1`, [id]);
+  return result.rows[0] ? mapContent(result.rows[0]) : null;
+}
+
+export async function deleteContentItem(id: string) {
+  const result = await query<{ id: string }>(
+    `DELETE FROM content_items WHERE id = $1 RETURNING id`,
+    [id],
+  );
+  return result.rows[0]?.id ?? null;
+}
+
 export async function createContentItem(input: ContentInput) {
   const result = await query<ContentRow>(
     `INSERT INTO content_items (
