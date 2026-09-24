@@ -31,7 +31,8 @@ export async function query<T extends pg.QueryResultRow = pg.QueryResultRow>(
   if (config.usePglite) {
     const db = await getPglite();
     const result = await db.query<T>(text, params);
-    return result as pg.QueryResult<T>;
+    const affected = (result as { affectedRows?: number }).affectedRows;
+    return { ...result, rowCount: affected ?? result.rows.length } as unknown as pg.QueryResult<T>;
   }
   return pgPool!.query<T>(text, params);
 }

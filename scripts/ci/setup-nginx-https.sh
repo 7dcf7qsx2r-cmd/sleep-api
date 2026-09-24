@@ -31,7 +31,7 @@ server {
     listen [::]:80;
     server_name api.xmianai.com;
 
-    client_max_body_size 20m;
+    client_max_body_size 50m;
 
     location / {
         proxy_pass http://sleep_api;
@@ -65,7 +65,7 @@ server {
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
-    client_max_body_size 20m;
+    client_max_body_size 50m;
 
     location / {
         proxy_pass http://sleep_api;

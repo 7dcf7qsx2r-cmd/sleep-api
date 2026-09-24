@@ -573,6 +573,8 @@ export const ENERGY_CLAIM_TYPES = new Set([
   'standin_reveal',
   'dream_pressure_smash',
   'squad_share_v2',
+  'cbti_diary',
+  'cbti_adherence_week',
 ]);
 
 export async function claimReward(

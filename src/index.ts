@@ -3,6 +3,9 @@ import * as Sentry from '@sentry/node';
 import { assertProductionConfig, config } from './config.js';
 import { createApp } from './app.js';
 import { startIotSleepEpochLoop } from './services/iotSleepEpochs.js';
+import { startPushDispatchLoop } from './services/push.js';
+import { registerCbtiPushGate } from './services/cbti/pushGate.js';
+import { startCbtiNightLoop } from './services/cbti/nightMonitor.js';
 
 assertProductionConfig();
 
@@ -14,6 +17,7 @@ if (config.sentryDsn) {
   });
 }
 
+registerCbtiPushGate();
 const app = createApp();
 
 serve({
@@ -27,5 +31,8 @@ serve({
   if (!config.usePglite) {
     startIotSleepEpochLoop();
     console.log('[sleep-api] cis_ip 30s sleep-epoch catch-up started');
+    startCbtiNightLoop();
+    startPushDispatchLoop();
+    console.log('[sleep-api] cbti night monitor and push dispatcher started');
   }
 });

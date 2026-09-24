@@ -14,14 +14,23 @@ pushRoutes.post(
     'json',
     z.object({
       platform: z.enum(['android', 'ios']),
-      token: z.string().min(10),
+      token: z.string().min(10).max(512),
+      provider: z.enum(['getui', 'jpush', 'fcm']).optional(),
+      vendor: z.string().max(32).optional(),
+      osVersion: z.string().max(64).optional(),
+      appVersion: z.string().max(32).optional(),
     }),
   ),
   async (c) => {
     const auth = c.get('auth');
     if (auth.type !== 'user') return c.json({ error: 'guest_not_allowed' }, 403);
     const body = c.req.valid('json');
-    const device = await registerDevice(auth.sub, body.platform, body.token);
+    const device = await registerDevice(auth.sub, body.platform, body.token, {
+      provider: body.provider,
+      vendor: body.vendor,
+      osVersion: body.osVersion,
+      appVersion: body.appVersion,
+    });
     return c.json({ ok: true, device });
   },
 );

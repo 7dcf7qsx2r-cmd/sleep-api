@@ -76,9 +76,109 @@ export async function upsertRealtime(items: RadarRealtimeInput[]): Promise<numbe
         JSON.stringify(item.raw ?? {}),
       ],
     );
+    await appendRealtimeSeries(mac, item);
     stored++;
   }
   return stored;
+}
+
+export const RADAR_SERIES_BUCKET_MS = 30_000;
+export const RADAR_SERIES_TTL_DAYS = 3;
+
+/** isbed：1 有人、0 无人；11 分析中、21 设备异常记为未知。 */
+function radarBedState(isbed: number | undefined): 'in' | 'out' | 'unknown' {
+  if (isbed === 1) return 'in';
+  if (isbed === 0) return 'out';
+  return 'unknown';
+}
+
+async function appendRealtimeSeries(mac: string, item: RadarRealtimeInput): Promise<void> {
+  const at = parseTimestamp(item.timeStamp) ?? new Date();
+  const bucket = new Date(Math.floor(at.getTime() / RADAR_SERIES_BUCKET_MS) * RADAR_SERIES_BUCKET_MS);
+  const bed = radarBedState(item.isbed);
+  const hr = bed === 'in' && item.heartRate && item.heartRate > 0 ? item.heartRate : null;
+  const rr = bed === 'in' && item.respiratoryRate && item.respiratoryRate > 0 ? item.respiratoryRate : null;
+  try {
+    await query(
+      `INSERT INTO radar_realtime_series (
+         mac, radar_number, bucket_at, samples, in_bed_samples, unknown_samples,
+         hr_n, hr_sum, hr_sq, rr_n, rr_sum, rr_sq
+       ) VALUES ($1, $2, $3, 1, $4, $5, $6, $7, $8, $9, $10, $11)
+       ON CONFLICT (mac, radar_number, bucket_at) DO UPDATE SET
+         samples = radar_realtime_series.samples + 1,
+         in_bed_samples = radar_realtime_series.in_bed_samples + EXCLUDED.in_bed_samples,
+         unknown_samples = radar_realtime_series.unknown_samples + EXCLUDED.unknown_samples,
+         hr_n = radar_realtime_series.hr_n + EXCLUDED.hr_n,
+         hr_sum = radar_realtime_series.hr_sum + EXCLUDED.hr_sum,
+         hr_sq = radar_realtime_series.hr_sq + EXCLUDED.hr_sq,
+         rr_n = radar_realtime_series.rr_n + EXCLUDED.rr_n,
+         rr_sum = radar_realtime_series.rr_sum + EXCLUDED.rr_sum,
+         rr_sq = radar_realtime_series.rr_sq + EXCLUDED.rr_sq`,
+      [
+        mac, item.radarNumber ?? 0, bucket,
+        bed === 'in' ? 1 : 0, bed === 'unknown' ? 1 : 0,
+        hr == null ? 0 : 1, hr ?? 0, hr == null ? 0 : hr * hr,
+        rr == null ? 0 : 1, rr ?? 0, rr == null ? 0 : rr * rr,
+      ],
+    );
+  } catch (err) {
+    console.warn('[radar] series append failed', err instanceof Error ? err.message : err);
+  }
+}
+
+export interface RadarSeriesEpoch {
+  startMs: number;
+  inBed: boolean | null;
+  hrMean: number | null;
+  hrStd: number | null;
+  rrMean: number | null;
+  rrStd: number | null;
+}
+
+function meanStd(n: number, sum: number, sq: number): { mean: number | null; std: number | null } {
+  if (n <= 0) return { mean: null, std: null };
+  const mean = sum / n;
+  const variance = n > 1 ? Math.max(0, sq / n - mean * mean) : 0;
+  return { mean, std: n > 1 ? Math.sqrt(variance) : null };
+}
+
+export async function listRealtimeSeries(mac: string, fromMs: number, toMs: number, radarNumber?: number): Promise<RadarSeriesEpoch[]> {
+  const { rows } = await query<{
+    bucket_at: Date | string;
+    samples: number;
+    in_bed_samples: number;
+    unknown_samples: number;
+    hr_n: number; hr_sum: number; hr_sq: number;
+    rr_n: number; rr_sum: number; rr_sq: number;
+  }>(
+    `SELECT bucket_at, samples, in_bed_samples, unknown_samples, hr_n, hr_sum, hr_sq, rr_n, rr_sum, rr_sq
+     FROM radar_realtime_series
+     WHERE mac = $1 AND ($4::int IS NULL OR radar_number = $4) AND bucket_at >= $2 AND bucket_at < $3
+     ORDER BY bucket_at ASC`,
+    [normalizeRadarMac(mac), new Date(fromMs), new Date(toMs), radarNumber ?? null],
+  );
+  return rows.map((r) => {
+    const samples = Number(r.samples);
+    const known = samples - Number(r.unknown_samples);
+    const hr = meanStd(Number(r.hr_n), Number(r.hr_sum), Number(r.hr_sq));
+    const rr = meanStd(Number(r.rr_n), Number(r.rr_sum), Number(r.rr_sq));
+    return {
+      startMs: new Date(r.bucket_at).getTime(),
+      inBed: known <= 0 ? null : Number(r.in_bed_samples) / known >= 0.8,
+      hrMean: hr.mean,
+      hrStd: hr.std,
+      rrMean: rr.mean,
+      rrStd: rr.std,
+    };
+  });
+}
+
+export async function purgeExpiredRadarSeries(): Promise<number> {
+  const res = await query(
+    `DELETE FROM radar_realtime_series WHERE bucket_at < NOW() - ($1::text || ' days')::interval`,
+    [String(RADAR_SERIES_TTL_DAYS)],
+  );
+  return res.rowCount ?? 0;
 }
 
 export async function upsertReports(items: RadarReportInput[]): Promise<number> {

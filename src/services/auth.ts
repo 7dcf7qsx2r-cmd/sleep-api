@@ -4,6 +4,7 @@ import { query, withTransaction } from '../db/client.js';
 import { signToken } from '../lib/jwt.js';
 import { maskPhone } from '../lib/phone.js';
 import { ensureEnergyAccount } from './energy.js';
+import { deleteUserCbtiData } from './cbti/plans.js';
 
 export class UserBannedError extends Error {
   constructor() {
@@ -237,6 +238,8 @@ export async function deleteUserAccount(userId: string): Promise<boolean> {
       `DELETE FROM data_blobs WHERE owner_type = 'user' AND owner_id = $1`,
       [userId],
     );
+    await deleteUserCbtiData(q, userId);
+    await q(`DELETE FROM push_devices WHERE user_id = $1`, [userId]);
   });
   return true;
 }

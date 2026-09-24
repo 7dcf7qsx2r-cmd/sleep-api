@@ -1,7 +1,9 @@
+import { pathToFileURL } from 'node:url';
 import { closeDb, query } from './client.js';
 import { IOT_MIGRATION_STATEMENTS } from './iotSchema.js';
+import { CBTI_MIGRATION_STATEMENTS } from './cbtiSchema.js';
 
-const MIGRATION_STATEMENTS = [
+export const MIGRATION_STATEMENTS = [
   `CREATE EXTENSION IF NOT EXISTS "pgcrypto"`,
   `CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -742,9 +744,12 @@ const MIGRATION_STATEMENTS = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_garden_help_daily_owner_day
    ON garden_help_daily (owner_id, day)`,
+
+  // === 6 周睡眠节律计划 ===
+  ...CBTI_MIGRATION_STATEMENTS,
 ];
 
-async function main() {
+export async function runMigrations(): Promise<void> {
   for (const sql of MIGRATION_STATEMENTS) {
     try {
       await query(sql);
@@ -757,11 +762,17 @@ async function main() {
       throw err;
     }
   }
+}
+
+async function main() {
+  await runMigrations();
   console.log('Migration complete.');
   await closeDb();
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

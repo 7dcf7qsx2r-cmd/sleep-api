@@ -10,6 +10,7 @@ import { adminUploadRoutes } from './uploads.js';
 import { adminSleepInterventionRoutes } from './sleepIntervention.js';
 import { adminVoiceMetricsRoutes } from './voiceMetrics.js';
 import { adminIotWatchRoutes } from './iotWatch.js';
+import { adminCbtiRoutes } from './cbti.js';
 
 export const adminRoutes = new Hono();
 
@@ -25,4 +26,5 @@ adminRoutes.route('/operations', adminOperationRoutes);
 adminRoutes.route('/uploads', adminUploadRoutes);
 adminRoutes.route('/sleep-intervention', adminSleepInterventionRoutes);
 adminRoutes.route('/voice-metrics', adminVoiceMetricsRoutes);
+adminRoutes.route('/cbti', adminCbtiRoutes);
 adminRoutes.route('/', adminSettingsRoutes);

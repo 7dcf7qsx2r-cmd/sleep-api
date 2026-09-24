@@ -7,6 +7,7 @@ import {
   type AdminVariables,
 } from '../../middleware/adminAuth.js';
 import { writeAdminAuditLog } from '../../modules/admin/audit.js';
+import { productIdConflict } from './productConflict.js';
 import {
   createProduct,
   listProducts,
@@ -59,7 +60,14 @@ adminProductRoutes.post(
   zValidator('json', productSchema),
   async (c) => {
     const body = c.req.valid('json');
-    const product = await createProduct(body);
+    let product;
+    try {
+      product = await createProduct(body);
+    } catch (error) {
+      const conflict = productIdConflict(error);
+      if (conflict) return c.json(conflict, 409);
+      throw error;
+    }
     const auth = c.get('adminAuth');
     await writeAdminAuditLog({
       adminUserId: auth.sub,
@@ -79,7 +87,14 @@ adminProductRoutes.patch(
   zValidator('json', productSchema.omit({ id: true })),
   async (c) => {
     const productId = c.req.param('id');
-    const result = await updateProduct(productId, c.req.valid('json'));
+    let result;
+    try {
+      result = await updateProduct(productId, c.req.valid('json'));
+    } catch (error) {
+      const conflict = productIdConflict(error);
+      if (conflict) return c.json(conflict, 409);
+      throw error;
+    }
     if (!result) return c.json({ error: 'not_found', message: '商品不存在' }, 404);
     const auth = c.get('adminAuth');
     await writeAdminAuditLog({

@@ -67,6 +67,10 @@ before(async () => {
       version INT NOT NULL DEFAULT 1,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`,
+    `CREATE TABLE cbti_plans (id UUID PRIMARY KEY, user_id UUID NOT NULL)`,
+    `CREATE TABLE cbti_consents (id UUID PRIMARY KEY, user_id UUID NOT NULL)`,
+    `CREATE TABLE cbti_night_summaries (user_id UUID NOT NULL, night_date DATE NOT NULL)`,
+    `CREATE TABLE push_devices (user_id UUID NOT NULL, platform TEXT NOT NULL, token TEXT NOT NULL)`,
   ]) {
     await query(sql);
   }
@@ -85,6 +89,9 @@ before(async () => {
      VALUES ('user', $1, 'profile', '{"nickname":"待注销"}')`,
     [USER_ID],
   );
+  await query(`INSERT INTO cbti_plans (id, user_id) VALUES ('00000000-0000-4000-8000-0000000000e1', $1)`, [USER_ID]);
+  await query(`INSERT INTO cbti_night_summaries (user_id, night_date) VALUES ($1, '2026-10-01')`, [USER_ID]);
+  await query(`INSERT INTO push_devices (user_id, platform, token) VALUES ($1, 'android', 'token-to-delete')`, [USER_ID]);
 });
 
 after(async () => {
@@ -121,6 +128,11 @@ test('注销后不可再取到账号资料，手机号可重新注册', async ()
     [USER_ID],
   );
   assert.equal(blobs.rows.length, 0);
+
+  for (const table of ['cbti_plans', 'cbti_night_summaries', 'push_devices']) {
+    const left = await query(`SELECT 1 FROM ${table} WHERE user_id = $1`, [USER_ID]);
+    assert.equal(left.rows.length, 0, `${table} cleared`);
+  }
 
   const nick = await query<{ nickname: string | null; avatar_url: string | null }>(
     `SELECT nickname, avatar_url FROM user_profiles WHERE user_id = $1`,

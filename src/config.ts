@@ -117,6 +117,17 @@ export const config = {
     'https://www.xmianai.com',
     'https://admin.xmianai.com',
   ]),
+  /** 聚合推送（PRD 10.2）。未配置的通道发送时记为 skipped，不报错。 */
+  push: {
+    fcmServerKey: process.env.FCM_SERVER_KEY?.trim() ?? '',
+    fcmProjectId: process.env.FCM_PROJECT_ID?.trim() ?? '',
+    getuiAppId: process.env.GETUI_APP_ID?.trim() ?? '',
+    getuiAppKey: process.env.GETUI_APP_KEY?.trim() ?? '',
+    getuiMasterSecret: process.env.GETUI_MASTER_SECRET?.trim() ?? '',
+    jpushAppKey: process.env.JPUSH_APP_KEY?.trim() ?? '',
+    jpushMasterSecret: process.env.JPUSH_MASTER_SECRET?.trim() ?? '',
+    apnsProduction: process.env.PUSH_APNS_PRODUCTION === '1',
+  },
   mqttControl: {
     url: process.env.MQTT_CONTROL_URL?.trim() ?? '',
     adminToken: process.env.MQTT_ADMIN_TOKEN?.trim() ?? '',

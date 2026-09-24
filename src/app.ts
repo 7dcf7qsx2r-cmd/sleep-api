@@ -18,6 +18,7 @@ import { expertRoutes } from './routes/experts.js';
 import { contentRoutes } from './routes/content.js';
 import { sleepInterventionRoutes } from './routes/sleepIntervention.js';
 import { reportRoutes } from './routes/report.js';
+import { cbtiRoutes } from './routes/cbti.js';
 import { config } from './config.js';
 
 function isAllowedOrigin(origin: string): boolean {
@@ -58,12 +59,20 @@ export function createApp() {
   app.route('/content', contentRoutes);
   app.route('/sleep-intervention', sleepInterventionRoutes);
   app.route('/report', reportRoutes);
+  app.route('/cbti', cbtiRoutes);
   app.route('/admin', adminRoutes);
 
   app.notFound((c) => c.json({ error: 'not_found' }, 404));
   app.onError((err, c) => {
+    const db = err as { code?: string; detail?: string; constraint?: string; table?: string; column?: string };
     console.error('[sleep-api] unhandled', {
       name: err.name,
+      message: err.message,
+      code: db.code,
+      constraint: db.constraint,
+      detail: db.detail,
+      table: db.table,
+      column: db.column,
       method: c.req.method,
       path: c.req.path,
     });
