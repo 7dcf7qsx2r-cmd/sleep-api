@@ -4,6 +4,7 @@ import {
   EPOCH_MS,
   IOT_SLEEP_TTL_DAYS,
   PILLOW_PRODUCT_KEY,
+  RESP_WINDOW_MS,
   SLEEP_PRODUCT_KEYS,
   aggregatePillowEpoch,
   calibrationFor,
@@ -16,14 +17,21 @@ import {
   type SleepProductKey,
   type SleepReportOverlay,
   type PillowTick,
+  windowTicksFor,
 } from './iotSleepEpochMath.js';
-import { estimatePillowSleep, type PillowSleepEstimate } from './iotSleepEstimate.js';
+import {
+  classifyPillowNight,
+  estimatePillowSleep,
+  type EpochStage,
+  type PillowSleepEstimate,
+} from './iotSleepEstimate.js';
 import { computeSleepDepthSeries } from './iotSleepDepth.js';
 import { toDateOnly } from '../utils/civilDate.js';
 
 const CATCHUP_BATCH = 5_000;
 const CATCHUP_MAX_BATCHES = 8;
-const LOOKBACK_MS = 60_000;
+/** 呼吸提取需要 epoch 前 120s 的尾随窗口，再留 30s 余量 */
+const LOOKBACK_MS = RESP_WINDOW_MS + EPOCH_MS;
 const TTL_INTERVAL = `${IOT_SLEEP_TTL_DAYS} days`;
 
 let catchUpRunning = false;
@@ -77,6 +85,12 @@ function mapEpochRow(row: {
   snore_db_max: number | null;
   moving_flag: number;
   quality: string;
+  resp_rate?: number | null;
+  resp_prom?: number | null;
+  resp_amp?: number | null;
+  actuating?: number | null;
+  p_left?: number | null;
+  p_right?: number | null;
 }): SleepEpochRow {
   const epochStartMs = receivedAtMs(row.epoch_start);
   return {
@@ -97,7 +111,17 @@ function mapEpochRow(row: {
     snoreDbMax: row.snore_db_max == null ? null : Number(row.snore_db_max),
     movingFlag: Number(row.moving_flag) ? 1 : 0,
     quality: row.quality === 'low' ? 'low' : 'ok',
+    respRate: nullableNumber(row.resp_rate),
+    respProm: nullableNumber(row.resp_prom),
+    respAmp: nullableNumber(row.resp_amp),
+    actuating: Number(row.actuating) ? 1 : 0,
+    pLeft: nullableNumber(row.p_left),
+    pRight: nullableNumber(row.p_right),
   };
+}
+
+function nullableNumber(value: number | null | undefined): number | null {
+  return value == null ? null : Number(value);
 }
 
 interface SleepDevice {
@@ -194,11 +218,13 @@ async function upsertEpoch(sn: string, productKey: SleepProductKey, epoch: Sleep
     `INSERT INTO iot_sleep_epochs (
        sn, epoch_start, product_key, night_date, sample_count, in_bed_ratio,
        hr_mean, hr_min, hr_std, br_mean, br_std, p_mean, motion,
-       snore_count, snore_db_max, moving_flag, quality
+       snore_count, snore_db_max, moving_flag, quality,
+       resp_rate, resp_prom, resp_amp, actuating, p_left, p_right
      ) VALUES (
        $1, $2::timestamptz, $3, $4::date, $5, $6,
        $7, $8, $9, $10, $11, $12, $13,
-       $14, $15, $16, $17
+       $14, $15, $16, $17,
+       $18, $19, $20, $21, $22, $23
      )
      ON CONFLICT (sn, epoch_start) DO UPDATE SET
        sample_count = EXCLUDED.sample_count,
@@ -213,7 +239,13 @@ async function upsertEpoch(sn: string, productKey: SleepProductKey, epoch: Sleep
        snore_count = EXCLUDED.snore_count,
        snore_db_max = EXCLUDED.snore_db_max,
        moving_flag = EXCLUDED.moving_flag,
-       quality = EXCLUDED.quality`,
+       quality = EXCLUDED.quality,
+       resp_rate = EXCLUDED.resp_rate,
+       resp_prom = EXCLUDED.resp_prom,
+       resp_amp = EXCLUDED.resp_amp,
+       actuating = EXCLUDED.actuating,
+       p_left = EXCLUDED.p_left,
+       p_right = EXCLUDED.p_right`,
     [
       sn,
       new Date(epoch.epochStartMs).toISOString(),
@@ -232,6 +264,12 @@ async function upsertEpoch(sn: string, productKey: SleepProductKey, epoch: Sleep
       epoch.snoreDbMax,
       epoch.movingFlag,
       epoch.quality,
+      epoch.respRate ?? null,
+      epoch.respProm ?? null,
+      epoch.respAmp ?? null,
+      epoch.actuating ?? 0,
+      epoch.pLeft ?? null,
+      epoch.pRight ?? null,
     ],
   );
 }
@@ -357,11 +395,13 @@ export async function catchUpPillowSleepEpochs(
     const maxEnd = Math.max(...closedEpochs) + EPOCH_MS;
     const window = await loadWindowMessages(id, pk, minStart - LOOKBACK_MS, maxEnd);
     const ticksByEpoch = new Map<number, PillowTick[]>();
+    const allTicks: PillowTick[] = [];
     const reports: SleepReportOverlay[] = [];
     for (const row of window) {
       const atMs = receivedAtMs(row.received_at);
       const tick = extractTick(pk, row.topic, row.raw_json, atMs);
       if (tick) {
+        allTicks.push(tick);
         const start = epochStartMs(tick.atMs);
         const list = ticksByEpoch.get(start);
         if (list) list.push(tick);
@@ -375,7 +415,7 @@ export async function catchUpPillowSleepEpochs(
     for (const start of closedEpochs) {
       const ticks = ticksByEpoch.get(start) ?? [];
       if (!ticks.length) continue;
-      const epoch = aggregatePillowEpoch(start, ticks, reports, cal);
+      const epoch = aggregatePillowEpoch(start, ticks, reports, cal, windowTicksFor(allTicks, start));
       await upsertEpoch(id, pk, epoch);
       nightDates.add(epoch.nightDate);
       wrote += 1;
@@ -438,10 +478,17 @@ export async function listSleepEpochs(sn: string, nightDate: string): Promise<Sl
     snore_db_max: number | null;
     moving_flag: number;
     quality: string;
+    resp_rate: number | null;
+    resp_prom: number | null;
+    resp_amp: number | null;
+    actuating: number | null;
+    p_left: number | null;
+    p_right: number | null;
   }>(
     `SELECT sn, epoch_start, product_key, night_date, sample_count, in_bed_ratio,
             hr_mean, hr_min, hr_std, br_mean, br_std, p_mean, motion,
-            snore_count, snore_db_max, moving_flag, quality
+            snore_count, snore_db_max, moving_flag, quality,
+            resp_rate, resp_prom, resp_amp, actuating, p_left, p_right
      FROM iot_sleep_epochs
      WHERE sn = $1 AND night_date = $2::date
      ORDER BY epoch_start ASC
@@ -499,7 +546,11 @@ export async function getSleepSession(sn: string, nightDate: string): Promise<Pi
   };
 }
 
-export function serializeSleepEpoch(row: SleepEpochRow, depth: number | null = null) {
+export function serializeSleepEpoch(
+  row: SleepEpochRow,
+  depth: number | null = null,
+  stage: EpochStage | null = null,
+) {
   return {
     sn: row.sn,
     productKey: row.productKey,
@@ -518,19 +569,32 @@ export function serializeSleepEpoch(row: SleepEpochRow, depth: number | null = n
     snoreDbMax: round1(row.snoreDbMax),
     movingFlag: row.movingFlag,
     quality: row.quality,
+    /** 由气压提取的呼吸率（次/分）与规律性（显著度） */
+    respRate: round1(row.respRate ?? null),
+    respProm: round1(row.respProm ?? null),
     /** 睡眠深度指数 0–100（夜内自归一化，低置信）；null=离床/信号不足 */
     sleepDepth: depth,
+    /** 逐 epoch 分期（估算）：off 离枕 / wake / light / deep / rem / unknown 气囊动作 */
+    stage,
   };
 }
 
 /**
- * 序列化整夜 epoch，并附加夜内自归一化的睡眠深度指数曲线。
- * 深度需要整夜分布，故在此按 sn 内一次性计算再逐 epoch 贴回。
+ * 序列化整夜 epoch，并附加逐 epoch 分期与睡眠深度指数曲线（均需整夜数据，一次性计算再贴回）。
+ * 走气压呼吸分期的设备不再给 hrStd 深度指数（其心率为固件占位值）。
  */
 export function serializeSleepEpochsWithDepth(rows: SleepEpochRow[]) {
+  if (!rows.length) return [];
+  const productKey = isSleepProductKey(rows[0]!.productKey) ? rows[0]!.productKey : PILLOW_PRODUCT_KEY;
+  const { stages, method } = classifyPillowNight(rows, rows[0]!.nightDate, productKey);
+  const stageByStart = new Map(stages.map((s) => [s.epochStartMs, s.stage]));
   const depthByStart = new Map<number, number | null>();
-  for (const p of computeSleepDepthSeries(rows)) depthByStart.set(p.epochStartMs, p.depth);
-  return rows.map((row) => serializeSleepEpoch(row, depthByStart.get(row.epochStartMs) ?? null));
+  if (method !== 'respiration') {
+    for (const p of computeSleepDepthSeries(rows)) depthByStart.set(p.epochStartMs, p.depth);
+  }
+  return rows.map((row) =>
+    serializeSleepEpoch(row, depthByStart.get(row.epochStartMs) ?? null, stageByStart.get(row.epochStartMs) ?? null),
+  );
 }
 
 export function serializeSleepSession(session: PillowSleepSession) {

@@ -73,6 +73,12 @@ export const IOT_MIGRATION_STATEMENTS = [
     PRIMARY KEY (sn, epoch_start)
   )`,
   `CREATE INDEX IF NOT EXISTS idx_iot_sleep_epochs_sn_night ON iot_sleep_epochs (sn, night_date, epoch_start)`,
+  `ALTER TABLE iot_sleep_epochs ADD COLUMN IF NOT EXISTS resp_rate DOUBLE PRECISION`,
+  `ALTER TABLE iot_sleep_epochs ADD COLUMN IF NOT EXISTS resp_prom DOUBLE PRECISION`,
+  `ALTER TABLE iot_sleep_epochs ADD COLUMN IF NOT EXISTS resp_amp DOUBLE PRECISION`,
+  `ALTER TABLE iot_sleep_epochs ADD COLUMN IF NOT EXISTS actuating SMALLINT NOT NULL DEFAULT 0`,
+  `ALTER TABLE iot_sleep_epochs ADD COLUMN IF NOT EXISTS p_left DOUBLE PRECISION`,
+  `ALTER TABLE iot_sleep_epochs ADD COLUMN IF NOT EXISTS p_right DOUBLE PRECISION`,
   `CREATE TABLE IF NOT EXISTS iot_sleep_epoch_cursor (
     sn TEXT PRIMARY KEY,
     last_message_id BIGINT NOT NULL DEFAULT 0,

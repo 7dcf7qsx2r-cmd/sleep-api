@@ -77,6 +77,15 @@ export function compactIotParams(params: Record<string, unknown>): string {
     ?? params.ISWBSleepReport
     ?? params.ibNew;
   if (sleep != null) bits.push(`sleep=${JSON.stringify(sleep)}`);
+  const pillowSleep = asRecord(params.SleepReportNew) ?? asRecord(params.sleepReportNew);
+  if (sleep == null && pillowSleep) {
+    const v = (key: string) => String(pillowSleep[key] ?? '-');
+    bits.push(
+      `sleep: person=${v('person')} heart=${String(pillowSleep.heartRate ?? pillowSleep.heart ?? '-')}`
+        + ` breath=${v('breathing')} move=${v('moving')} snore=${v('snoreStatus')}`
+        + ` db=${v('db')} kill=${v('snoreKill')}`,
+    );
+  }
   if (typeof params.firmwareVer === 'string' && params.firmwareVer) {
     bits.push(`fw=${params.firmwareVer}`);
   }

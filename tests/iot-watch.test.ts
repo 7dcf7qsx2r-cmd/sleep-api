@@ -91,6 +91,28 @@ describe('iot watch compact', () => {
     );
   });
 
+  test('CIS-IP SleepReportNew shows snore flag and dB', () => {
+    const params = {
+      SleepReportNew: {
+        db: 32,
+        moving: 0,
+        person: 1,
+        breathing: 14,
+        heartRate: 62,
+        snoreKill: 1,
+        snoreStatus: 1,
+      },
+    };
+    assert.equal(
+      compactIotParams(params),
+      'sleep: person=1 heart=62 breath=14 move=0 snore=1 db=32 kill=1',
+    );
+    assert.equal(
+      highlightIotParams('/sys/cis_ip/14639369CCDC/thing/property/post', params),
+      'sleep',
+    );
+  });
+
   test('short topic strips product prefix', () => {
     assert.equal(
       shortTopic('/sys/cis_ib/68EE8F4740BC/thing/property/post', '68EE8F4740BC', 'cis_ib'),
