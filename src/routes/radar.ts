@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import { Hono } from 'hono';
 import type { Context, Next } from 'hono';
 import { config } from '../config.js';
@@ -15,18 +16,40 @@ import {
 
 export const radarRoutes = new Hono();
 
+function safeEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
+/** 厂商推送一般只能配一个 URL，无法加请求头：密钥可放 Bearer、?token= 或路径 /datapost/:token */
+export function radarPushTokenOk(
+  secret: string,
+  input: { authorization?: string | null; queryToken?: string | null; pathToken?: string | null },
+): boolean {
+  if (!secret) return true;
+  const bearer = input.authorization?.startsWith('Bearer ') ? input.authorization.slice(7) : null;
+  return [bearer, input.queryToken, input.pathToken].some((t) => !!t && safeEqual(t, secret));
+}
+
 async function requireRadarPushAuth(c: Context, next: Next) {
-  if (!config.radarPushSecret) {
-    await next();
-    return;
-  }
-  const header = c.req.header('Authorization');
-  const token = header?.startsWith('Bearer ') ? header.slice(7) : null;
-  if (token === config.radarPushSecret) {
+  const ok = radarPushTokenOk(config.radarPushSecret, {
+    authorization: c.req.header('Authorization'),
+    queryToken: c.req.query('token'),
+    pathToken: c.req.param('token'),
+  });
+  if (ok) {
     await next();
     return;
   }
   return c.json({ ret: 1, msg: 'unauthorized' }, 401);
+}
+
+function radarNumberQuery(c: Context): number | undefined {
+  const raw = c.req.query('radar');
+  if (!raw) return undefined;
+  const n = Number.parseInt(raw, 10);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
 }
 
 function mapRealtimeItem(raw: Record<string, unknown>): RadarRealtimeInput | null {
@@ -53,6 +76,7 @@ function mapReportItem(raw: Record<string, unknown>): RadarReportInput | null {
   return {
     sleep_id,
     mac,
+    radar_number: typeof raw.radar_number === 'number' ? raw.radar_number : undefined,
     inbed_time: typeof raw.inbed_time === 'number' ? raw.inbed_time : undefined,
     outbed_time: typeof raw.outbed_time === 'number' ? raw.outbed_time : undefined,
     deep_sleeptime: typeof raw.deep_sleeptime === 'number' ? raw.deep_sleeptime : undefined,
@@ -71,7 +95,7 @@ function mapReportItem(raw: Record<string, unknown>): RadarReportInput | null {
 }
 
 /** 厂商推送实时数据 */
-radarRoutes.post('/datapost', requireRadarPushAuth, async (c) => {
+async function handleDatapost(c: Context) {
   const body = await c.req.json().catch(() => null);
   if (!Array.isArray(body)) {
     return c.json({ ret: 1, msg: 'payload must be array' }, 400);
@@ -85,10 +109,10 @@ radarRoutes.post('/datapost', requireRadarPushAuth, async (c) => {
   const stored = await upsertRealtime(items);
   console.log(`[radar] datapost stored=${stored}`);
   return c.json({ ret: 0, msg: 'ok', stored });
-});
+}
 
 /** 厂商推送睡眠报告 */
-radarRoutes.post('/reportpost', requireRadarPushAuth, async (c) => {
+async function handleReportpost(c: Context) {
   const body = await c.req.json().catch(() => null);
   if (!Array.isArray(body)) {
     return c.json({ ret: 1, msg: 'payload must be array' }, 400);
@@ -102,14 +126,19 @@ radarRoutes.post('/reportpost', requireRadarPushAuth, async (c) => {
   const stored = await upsertReports(items);
   console.log(`[radar] reportpost stored=${stored}`);
   return c.json({ ret: 0, msg: 'ok', stored });
-});
+}
 
-/** App 查询最新实时数据 */
+radarRoutes.post('/datapost', requireRadarPushAuth, handleDatapost);
+radarRoutes.post('/datapost/:token', requireRadarPushAuth, handleDatapost);
+radarRoutes.post('/reportpost', requireRadarPushAuth, handleReportpost);
+radarRoutes.post('/reportpost/:token', requireRadarPushAuth, handleReportpost);
+
+/** App 查询最新实时数据（?radar=2 取双雷达设备的另一侧） */
 radarRoutes.get('/latest', async (c) => {
   const mac = c.req.query('mac');
   if (!mac) return c.json({ error: 'mac required' }, 400);
 
-  const data = await getLatestRealtime(normalizeRadarMac(mac));
+  const data = await getLatestRealtime(normalizeRadarMac(mac), radarNumberQuery(c));
   if (!data) return c.json({ error: 'no data' }, 404);
   return c.json(data);
 });
@@ -121,7 +150,11 @@ radarRoutes.get('/reports', async (c) => {
   if (!mac) return c.json({ error: 'mac required' }, 400);
 
   const days = Number.parseInt(daysRaw, 10);
-  const reports = await listSleepReports(normalizeRadarMac(mac), Number.isFinite(days) ? days : 7);
+  const reports = await listSleepReports(
+    normalizeRadarMac(mac),
+    Number.isFinite(days) ? days : 7,
+    radarNumberQuery(c),
+  );
   return c.json({ reports });
 });
 
@@ -131,7 +164,7 @@ radarRoutes.get('/report', async (c) => {
   const date = c.req.query('date');
   if (!mac) return c.json({ error: 'mac required' }, 400);
 
-  const report = await getSleepReport(normalizeRadarMac(mac), date || undefined);
+  const report = await getSleepReport(normalizeRadarMac(mac), date || undefined, radarNumberQuery(c));
   if (!report) return c.json({ error: 'no report' }, 404);
   return c.json(report);
 });

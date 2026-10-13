@@ -4,6 +4,12 @@ export function normalizeRadarMac(mac: string): string {
   return mac.replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
 }
 
+/** 厂商 radarNumber：1 = 雷达一（默认），2 = 双雷达设备的另一侧 */
+export function normalizeRadarNumber(value: unknown): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isInteger(n) && n > 0 ? n : 1;
+}
+
 export interface RadarRealtimeInput {
   mac: string;
   radarNumber?: number;
@@ -20,6 +26,7 @@ export interface RadarRealtimeInput {
 export interface RadarReportInput {
   sleep_id: string;
   mac: string;
+  radar_number?: number;
   inbed_time?: number;
   outbed_time?: number;
   deep_sleeptime?: number;
@@ -52,8 +59,7 @@ export async function upsertRealtime(items: RadarRealtimeInput[]): Promise<numbe
       `INSERT INTO radar_realtime_latest (
         mac, radar_number, heart_rate, respiratory_rate, isbed, signal, alarm_type, online, time_stamp, raw_json, updated_at
       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
-      ON CONFLICT (mac) DO UPDATE SET
-        radar_number = EXCLUDED.radar_number,
+      ON CONFLICT (mac, radar_number) DO UPDATE SET
         heart_rate = EXCLUDED.heart_rate,
         respiratory_rate = EXCLUDED.respiratory_rate,
         isbed = EXCLUDED.isbed,
@@ -65,7 +71,7 @@ export async function upsertRealtime(items: RadarRealtimeInput[]): Promise<numbe
         updated_at = NOW()`,
       [
         mac,
-        item.radarNumber ?? null,
+        normalizeRadarNumber(item.radarNumber),
         item.heartRate ?? null,
         item.respiratoryRate ?? null,
         item.isbed ?? null,
@@ -190,10 +196,12 @@ export async function upsertReports(items: RadarReportInput[]): Promise<number> 
     await query(
       `INSERT INTO radar_sleep_reports (
         sleep_id, mac, inbed_time, outbed_time, deep_sleeptime, light_sleeptime, rem_time, wake_time,
-        sleep_score, sdate, edate, assess_json, heartlist_json, resplist_json, datelist_json, raw_json
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+        sleep_score, sdate, edate, assess_json, heartlist_json, resplist_json, datelist_json, raw_json,
+        radar_number
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
       ON CONFLICT (sleep_id) DO UPDATE SET
         mac = EXCLUDED.mac,
+        radar_number = EXCLUDED.radar_number,
         inbed_time = EXCLUDED.inbed_time,
         outbed_time = EXCLUDED.outbed_time,
         deep_sleeptime = EXCLUDED.deep_sleeptime,
@@ -225,6 +233,7 @@ export async function upsertReports(items: RadarReportInput[]): Promise<number> 
         JSON.stringify(item.resplist ?? null),
         JSON.stringify(item.datelist ?? null),
         JSON.stringify(item.raw ?? {}),
+        normalizeRadarNumber(item.radar_number),
       ],
     );
     stored++;
@@ -232,32 +241,33 @@ export async function upsertReports(items: RadarReportInput[]): Promise<number> 
   return stored;
 }
 
-export async function getLatestRealtime(mac: string) {
-  const norm = normalizeRadarMac(mac);
-  const { rows } = await query<{
-    mac: string;
-    radar_number: number | null;
-    heart_rate: number | null;
-    respiratory_rate: number | null;
-    isbed: number | null;
-    signal: number | null;
-    alarm_type: number | null;
-    online: number | null;
-    time_stamp: Date | null;
-    updated_at: Date;
-  }>(
-    `SELECT mac, radar_number, heart_rate, respiratory_rate, isbed, signal, alarm_type, online, time_stamp, updated_at
-     FROM radar_realtime_latest WHERE mac = $1`,
-    [norm],
-  );
-  const row = rows[0];
-  if (!row) return null;
+interface RealtimeRow {
+  mac: string;
+  radar_number: number;
+  heart_rate: number | null;
+  respiratory_rate: number | null;
+  isbed: number | null;
+  signal: number | null;
+  alarm_type: number | null;
+  online: number | null;
+  time_stamp: Date | null;
+  raw_json: Record<string, unknown> | null;
+  updated_at: Date;
+}
 
+function rawNumber(raw: Record<string, unknown> | null, key: string): number | undefined {
+  const value = raw?.[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function serializeRealtime(row: RealtimeRow) {
   return {
     mac: row.mac,
-    radarNumber: row.radar_number ?? undefined,
+    radarNumber: Number(row.radar_number),
+    deviceModel: rawNumber(row.raw_json, 'deviceModel'),
     heartRate: row.heart_rate ?? undefined,
     respiratoryRate: row.respiratory_rate ?? undefined,
+    turn: rawNumber(row.raw_json, 'turn'),
     isbed: row.isbed ?? undefined,
     signal: row.signal ?? undefined,
     alarmType: row.alarm_type ?? undefined,
@@ -266,24 +276,45 @@ export async function getLatestRealtime(mac: string) {
   };
 }
 
-export async function getSleepReport(mac: string, date?: string) {
+/**
+ * 最新实时数据。指定 radarNumber 时只返回那一侧；
+ * 否则返回雷达一（没有则取最近更新的一侧），并在 radars 里附上所有侧。
+ */
+export async function getLatestRealtime(mac: string, radarNumber?: number) {
   const norm = normalizeRadarMac(mac);
-  let sql = `SELECT sleep_id, mac, inbed_time, outbed_time, deep_sleeptime, light_sleeptime, rem_time, wake_time,
-                    sleep_score, sdate, edate, assess_json, heartlist_json, resplist_json, datelist_json, created_at
-             FROM radar_sleep_reports WHERE mac = $1`;
-  const params: unknown[] = [norm];
+  const { rows } = await query<RealtimeRow>(
+    `SELECT mac, radar_number, heart_rate, respiratory_rate, isbed, signal, alarm_type, online,
+            time_stamp, raw_json, updated_at
+     FROM radar_realtime_latest
+     WHERE mac = $1 AND ($2::int IS NULL OR radar_number = $2)
+     ORDER BY radar_number ASC`,
+    [norm, radarNumber ?? null],
+  );
+  if (!rows.length) return null;
+  const radars = rows.map(serializeRealtime);
+  const primary = radars.find((r) => r.radarNumber === 1)
+    ?? [...rows].sort((a, b) => b.updated_at.getTime() - a.updated_at.getTime()).map(serializeRealtime)[0]!;
+  return { ...primary, radars };
+}
+
+export async function getSleepReport(mac: string, date?: string, radarNumber?: number) {
+  const norm = normalizeRadarMac(mac);
+  let sql = `SELECT sleep_id, mac, radar_number, inbed_time, outbed_time, deep_sleeptime, light_sleeptime, rem_time,
+                    wake_time, sleep_score, sdate, edate, assess_json, heartlist_json, resplist_json, datelist_json,
+                    created_at
+             FROM radar_sleep_reports WHERE mac = $1 AND ($2::int IS NULL OR radar_number = $2)`;
+  const params: unknown[] = [norm, radarNumber ?? null];
 
   if (date) {
-    sql += ` AND (sdate::date = $2::date OR edate::date = $2::date OR created_at::date = $2::date)`;
+    sql += ` AND (sdate::date = $3::date OR edate::date = $3::date OR created_at::date = $3::date)`;
     params.push(date);
-    sql += ` ORDER BY created_at DESC LIMIT 1`;
-  } else {
-    sql += ` ORDER BY created_at DESC LIMIT 1`;
   }
+  sql += ` ORDER BY created_at DESC LIMIT 1`;
 
   const { rows } = await query<{
     sleep_id: string;
     mac: string;
+    radar_number: number;
     inbed_time: number | null;
     outbed_time: number | null;
     deep_sleeptime: number | null;
@@ -305,6 +336,7 @@ export async function getSleepReport(mac: string, date?: string) {
   return {
     sleep_id: row.sleep_id,
     mac: row.mac,
+    radar_number: Number(row.radar_number),
     inbed_time: row.inbed_time ?? 0,
     outbed_time: row.outbed_time ?? 0,
     deep_sleeptime: row.deep_sleeptime ?? 0,
@@ -321,13 +353,14 @@ export async function getSleepReport(mac: string, date?: string) {
   };
 }
 
-export async function listSleepReports(mac: string, days = 7) {
+export async function listSleepReports(mac: string, days = 7, radarNumber?: number) {
   const norm = normalizeRadarMac(mac);
   const clampedDays = Math.min(Math.max(Math.floor(days), 1), 90);
 
   const { rows } = await query<{
     sleep_id: string;
     mac: string;
+    radar_number: number;
     inbed_time: number | null;
     deep_sleeptime: number | null;
     light_sleeptime: number | null;
@@ -341,18 +374,20 @@ export async function listSleepReports(mac: string, days = 7) {
     resplist_json: unknown;
     datelist_json: unknown;
   }>(
-    `SELECT sleep_id, mac, inbed_time, deep_sleeptime, light_sleeptime, rem_time, wake_time,
+    `SELECT sleep_id, mac, radar_number, inbed_time, deep_sleeptime, light_sleeptime, rem_time, wake_time,
             sleep_score, sdate, edate, assess_json, heartlist_json, resplist_json, datelist_json
      FROM radar_sleep_reports
      WHERE mac = $1
+       AND ($3::int IS NULL OR radar_number = $3)
        AND COALESCE(sdate, created_at) >= NOW() - ($2::text || ' days')::interval
      ORDER BY COALESCE(sdate, created_at) ASC`,
-    [norm, String(clampedDays)],
+    [norm, String(clampedDays), radarNumber ?? null],
   );
 
   return rows.map((row) => ({
     sleep_id: row.sleep_id,
     mac: row.mac,
+    radar_number: Number(row.radar_number),
     inbed_time: row.inbed_time ?? 0,
     deep_sleeptime: row.deep_sleeptime ?? 0,
     light_sleeptime: row.light_sleeptime ?? 0,
@@ -370,7 +405,8 @@ export async function listSleepReports(mac: string, days = 7) {
 
 export async function listKnownDevices(): Promise<Array<{ mac: string; alias?: string; online?: boolean }>> {
   const { rows } = await query<{ mac: string; online: number | null; updated_at: Date }>(
-    `SELECT mac, online, updated_at FROM radar_realtime_latest ORDER BY updated_at DESC`,
+    `SELECT mac, MAX(online) AS online, MAX(updated_at) AS updated_at
+     FROM radar_realtime_latest GROUP BY mac ORDER BY MAX(updated_at) DESC`,
   );
   return rows.map((r) => ({
     mac: r.mac,

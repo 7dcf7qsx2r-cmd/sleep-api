@@ -2,6 +2,7 @@ import { pathToFileURL } from 'node:url';
 import { closeDb, query } from './client.js';
 import { IOT_MIGRATION_STATEMENTS } from './iotSchema.js';
 import { CBTI_MIGRATION_STATEMENTS } from './cbtiSchema.js';
+import { RADAR_MIGRATION_STATEMENTS } from './radarSchema.js';
 
 export const MIGRATION_STATEMENTS = [
   `CREATE EXTENSION IF NOT EXISTS "pgcrypto"`,
@@ -592,42 +593,8 @@ export const MIGRATION_STATEMENTS = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_job_queue_pending ON job_queue (status, scheduled_at)`,
 
-  // === 生物雷达（OmeSoft 云端推送）===
-  `CREATE TABLE IF NOT EXISTS radar_realtime_latest (
-    mac TEXT PRIMARY KEY,
-    radar_number INT,
-    heart_rate INT,
-    respiratory_rate INT,
-    isbed INT,
-    signal INT,
-    alarm_type INT,
-    online INT,
-    time_stamp TIMESTAMPTZ,
-    raw_json JSONB NOT NULL DEFAULT '{}',
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_radar_realtime_updated ON radar_realtime_latest (updated_at DESC)`,
-
-  `CREATE TABLE IF NOT EXISTS radar_sleep_reports (
-    sleep_id TEXT PRIMARY KEY,
-    mac TEXT NOT NULL,
-    inbed_time INT,
-    outbed_time INT,
-    deep_sleeptime INT,
-    light_sleeptime INT,
-    rem_time INT,
-    wake_time INT,
-    sleep_score INT,
-    sdate TIMESTAMPTZ,
-    edate TIMESTAMPTZ,
-    assess_json JSONB,
-    heartlist_json JSONB,
-    resplist_json JSONB,
-    datelist_json JSONB,
-    raw_json JSONB NOT NULL DEFAULT '{}',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_radar_reports_mac ON radar_sleep_reports (mac, created_at DESC)`,
+  // === 生物雷达 / BR 系列床垫（OmeSoft 云端推送）===
+  ...RADAR_MIGRATION_STATEMENTS,
 
   // === MQTT 床旁设备（与 sleep-mqtt 共库，原文 JSONB）===
   ...IOT_MIGRATION_STATEMENTS,
