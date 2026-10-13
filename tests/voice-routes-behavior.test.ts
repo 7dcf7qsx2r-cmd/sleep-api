@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -289,4 +289,66 @@ test('供应商错误正文不透传，断连会中止上游请求', async () =>
   assert.equal(cancelled.status, 408);
   assert.equal((await cancelled.json() as { error: string }).error, 'request_cancelled');
   assert.equal(upstreamSignal?.aborted, true);
+});
+
+function sttFixtureForm(name: string, type = 'audio/mp4'): FormData {
+  const bytes = readFileSync(join(import.meta.dirname, 'fixtures', 'stt', name));
+  const form = new FormData();
+  form.append('file', new File([bytes], 'voice.m4a', { type }));
+  return form;
+}
+
+async function sttUsage(token: string): Promise<{ count: number; seconds: number }> {
+  const sub = JSON.parse(Buffer.from(token.split('.')[1]!, 'base64url').toString()).sub as string;
+  const rows = await query<{ stt_count: number; stt_seconds: number }>(
+    `SELECT stt_count, stt_seconds FROM ai_usage_daily WHERE subject_id = $1 AND usage_date = CURRENT_DATE`,
+    [sub],
+  );
+  return { count: rows.rows[0]?.stt_count ?? 0, seconds: rows.rows[0]?.stt_seconds ?? 0 };
+}
+
+test('STT 接受 iOS M4A 与华为 3gp4 品牌录音，并清洗 SenseVoice 标签与表情', async () => {
+  const token = await signToken({ sub: randomUUID(), type: 'guest' });
+  const providerTypes: string[] = [];
+  globalThis.fetch = async (_input, init) => {
+    const file = (init?.body as FormData).get('file') as File;
+    providerTypes.push(file.type);
+    return Response.json({ text: '<|zh|><|NEUTRAL|>今天晚上睡得怎么样？😊' });
+  };
+
+  for (const name of ['ios-m4a-brand.m4a', 'android-3gp-brand.m4a']) {
+    const response = await aiRoutes.request('/stt/transcribe', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: sttFixtureForm(name),
+    });
+    assert.equal(response.status, 200, name);
+    assert.deepEqual(await response.json(), { text: '今天晚上睡得怎么样？' });
+  }
+  assert.deepEqual(providerTypes, ['audio/mp4', 'audio/mp4']);
+  assert.equal((await sttUsage(token)).count, 2);
+});
+
+test('STT 无语音返回 no_speech，不扣额度也不触发熔断', async () => {
+  const token = await signToken({ sub: randomUUID(), type: 'guest' });
+  globalThis.fetch = async () => Response.json({ text: ' 😊 ' });
+
+  for (let i = 0; i < 6; i += 1) {
+    const response = await aiRoutes.request('/stt/transcribe', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: sttFixtureForm('android-3gp-brand.m4a', 'video/3gpp'),
+    });
+    assert.equal(response.status, 422);
+    assert.equal((await response.json() as { error: string }).error, 'no_speech');
+  }
+  assert.deepEqual(await sttUsage(token), { count: 0, seconds: 0 });
+
+  globalThis.fetch = async () => Response.json({ text: '你好' });
+  const ok = await aiRoutes.request('/stt/transcribe', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: sttFixtureForm('ios-m4a-brand.m4a', 'audio/x-m4a'),
+  });
+  assert.equal(ok.status, 200);
 });

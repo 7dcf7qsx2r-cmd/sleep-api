@@ -9,7 +9,12 @@ import { persistRemoteImage } from '../lib/saveUploadedImage.js';
 import { parseChatToolCalls } from '../lib/chatToolCalls.js';
 import { synthesizeSiliconFlowSpeech } from '../lib/siliconflowTts.js';
 import { transcribeSiliconFlowAudio } from '../lib/siliconflowStt.js';
-import { checkAndConsume, checkAndIncrement, getQuotaSnapshot } from '../services/quota.js';
+import {
+  checkAndConsume,
+  checkAndIncrement,
+  getQuotaSnapshot,
+  refundSttQuota,
+} from '../services/quota.js';
 import { ownerFromAuth } from '../lib/owner.js';
 import { loadSleepNights } from '../services/sleepNights.js';
 import { generateHomeDailyInsight } from '../services/homeInsight.js';
@@ -1460,9 +1465,10 @@ aiRoutes.post('/stt/transcribe', async (c) => {
       c.req.raw.signal,
     );
     if (stt.code !== 'cancelled') {
-      recordVoiceProviderResult('stt', Boolean(stt.text));
+      recordVoiceProviderResult('stt', Boolean(stt.text) || stt.code === 'no_speech');
     }
     if (!stt.text) {
+      await refundSttQuota(auth.type, auth.sub, validated.durationSec).catch(() => undefined);
       await recordVoiceEvent({
         feature: 'stt',
         outcome: stt.code ?? 'provider_unavailable',
@@ -1476,6 +1482,9 @@ aiRoutes.post('/stt/transcribe', async (c) => {
         providerStatus: stt.providerStatus,
         providerTraceId: stt.providerTraceId,
       });
+      if (stt.code === 'no_speech') {
+        return c.json({ error: 'no_speech', message: '没听清，请按住再说一次' }, 422);
+      }
       if (stt.code === 'timeout') {
         return c.json({ error: 'voice_timeout', message: '语音识别超时，请重试' }, 504);
       }

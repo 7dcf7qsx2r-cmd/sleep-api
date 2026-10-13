@@ -152,6 +152,22 @@ export async function checkAndConsume(
   return { allowed, snapshot: await getQuotaSnapshot(subjectType, subjectId) };
 }
 
+/** 退回 checkAndConsume('stt') 预扣的额度（识别失败或没识别到语音时不计费）。 */
+export async function refundSttQuota(
+  subjectType: SubjectType,
+  subjectId: string,
+  units: number,
+): Promise<void> {
+  const seconds = Math.max(1, Math.ceil(units));
+  await query(
+    `UPDATE ai_usage_daily
+     SET stt_count = GREATEST(stt_count - 1, 0),
+         stt_seconds = GREATEST(stt_seconds - $3, 0)
+     WHERE subject_type = $1 AND subject_id = $2 AND usage_date = CURRENT_DATE`,
+    [subjectType, subjectId, seconds],
+  );
+}
+
 export async function checkAndIncrement(
   subjectType: SubjectType,
   subjectId: string,
