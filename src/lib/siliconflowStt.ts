@@ -2,6 +2,8 @@ import { config } from '../config.js';
 
 const STT_URL = 'https://api.siliconflow.cn/v1/audio/transcriptions';
 const STT_MODEL = 'FunAudioLLM/SenseVoiceSmall';
+/** 补发走另一套后端：SenseVoice 整体排队时（实测 15～36s）它仍在 0.3s 左右返回。 */
+const STT_FALLBACK_MODEL = 'TeleAI/TeleSpeechASR';
 
 export type SttUpstreamResult = {
   text: string | null;
@@ -30,17 +32,17 @@ export function cleanSttTranscript(raw: string): string {
 }
 
 /**
- * 供应商偶发排队（实测同一段 37s 音频 0.4s～13s），超过该时长仍未返回就并发补发一次，
+ * 供应商偶发排队（实测同一段 37s 音频 0.4s～13s），超过该时长仍未返回就用备用模型并发补发一次，
  * 先成功者胜出、另一个立即取消。
  */
 export const STT_HEDGE_DELAY_MS = 2_500;
 const STT_MAX_ATTEMPTS = 2;
 
-function isFinalResult(result: SttUpstreamResult): boolean {
-  return Boolean(result.text)
-    || result.code === 'no_speech'
-    || result.code === 'provider_auth'
-    || result.code === 'provider_quota';
+/** 备用模型的鉴权/额度错误不代表主模型不可用，不能据此提前结束。 */
+function isFinalResult(result: SttUpstreamResult, model: string): boolean {
+  if (result.text || result.code === 'no_speech') return true;
+  return model === STT_MODEL
+    && (result.code === 'provider_auth' || result.code === 'provider_quota');
 }
 
 export async function transcribeSiliconFlowAudio(
@@ -77,19 +79,20 @@ export async function transcribeSiliconFlowAudio(
       };
       const launch = () => {
         if (settled || attempts.length >= STT_MAX_ATTEMPTS) return;
+        const model = attempts.length === 0 ? STT_MODEL : STT_FALLBACK_MODEL;
         const attempt = new AbortController();
         attempts.push(attempt);
         const onAbort = () => attempt.abort(controller.signal.reason);
         controller.signal.addEventListener('abort', onAbort, { once: true });
         pending += 1;
-        void requestOnce(audio, filename, mimeType, attempt.signal).then((value) => {
+        void requestOnce(audio, filename, mimeType, model, attempt.signal).then((value) => {
           controller.signal.removeEventListener('abort', onAbort);
           pending -= 1;
-          if (isFinalResult(value)) {
+          if (isFinalResult(value, model)) {
             finish(value);
             return;
           }
-          lastFailure = value;
+          if (model === STT_MODEL || lastFailure.code === 'provider_unavailable') lastFailure = value;
           if (controller.signal.aborted) {
             if (pending === 0) finish(lastFailure);
             return;
@@ -120,11 +123,12 @@ async function requestOnce(
   audio: ArrayBuffer,
   filename: string,
   mimeType: string,
+  model: string,
   signal: AbortSignal,
 ): Promise<SttUpstreamResult> {
   try {
     const form = new FormData();
-    form.append('model', STT_MODEL);
+    form.append('model', model);
     form.append('file', new Blob([audio], { type: mimeType || 'audio/mp4' }), filename);
 
     const res = await fetch(STT_URL, {
@@ -145,6 +149,7 @@ async function requestOnce(
           ? 'provider_quota'
           : 'provider_unavailable';
       console.warn('[sleep-api] STT provider rejected request', {
+        model,
         status: res.status,
         traceId: providerTraceId,
       });

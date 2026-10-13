@@ -12,6 +12,10 @@ test.afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
+function modelOf(init?: RequestInit): string {
+  return String((init?.body as FormData).get('model'));
+}
+
 function hangUntilAborted(init?: RequestInit, onAbort?: () => void): Promise<Response> {
   return new Promise((_resolve, reject) => {
     init?.signal?.addEventListener('abort', () => {
@@ -21,11 +25,13 @@ function hangUntilAborted(init?: RequestInit, onAbort?: () => void): Promise<Res
   });
 }
 
-test('首个请求卡住时补发一次，先返回者胜出并取消另一个', async () => {
+test('首个请求卡住时用备用模型补发一次，先返回者胜出并取消另一个', async () => {
   let calls = 0;
   let firstAborted = false;
+  const models: string[] = [];
   globalThis.fetch = async (_input, init) => {
     calls += 1;
+    models.push(modelOf(init));
     if (calls === 1) return hangUntilAborted(init, () => { firstAborted = true; });
     return Response.json({ text: '你好😊' });
   };
@@ -36,8 +42,21 @@ test('首个请求卡住时补发一次，先返回者胜出并取消另一个',
   });
   assert.equal(result.text, '你好');
   assert.equal(calls, 2);
+  assert.deepEqual(models, ['FunAudioLLM/SenseVoiceSmall', 'TeleAI/TeleSpeechASR']);
   assert.equal(firstAborted, true);
   assert.ok(Date.now() - startedAt < 1_000);
+});
+
+test('备用模型额度不足时不提前结束，等主模型返回', async () => {
+  globalThis.fetch = async (_input, init) => {
+    if (modelOf(init) === 'TeleAI/TeleSpeechASR') return new Response('no balance', { status: 402 });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    return Response.json({ text: '还是睡不着' });
+  };
+  const result = await transcribeSiliconFlowAudio(audio, 'voice.m4a', 'audio/mp4', undefined, {
+    hedgeDelayMs: 10,
+  });
+  assert.equal(result.text, '还是睡不着');
 });
 
 test('首个请求很快成功时不补发', async () => {
