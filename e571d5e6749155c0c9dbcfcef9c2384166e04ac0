@@ -1,0 +1,36 @@
+src/db/iotSchema.ts
+  4c5b675c683fbb53 76-81
+tests/iot-watch.test.ts
+  4c5b675c683fbb53 94-115
+src/services/iotSleepEpochMath.ts
+  4c5b675c683fbb53 30-34,38-39,57-58,84-93,147-148,156,348-472,486-489,495,511,513-520,541-546,550-563
+src/services/iotSleepEstimate.ts
+  4c5b675c683fbb53 20-22,30-81,83,101-111,133-161,183,186-188,191-192,195,197,204,232-237,239-257,259,261-262,264,269,273,283,286,291-294,297-298,309-610,612,614-630,633-653
+scripts/pillow-sleep-replay.ts
+  4c5b675c683fbb53 1-148
+tests/iot-sleep-respiration.test.ts
+  4c5b675c683fbb53 1-205
+src/services/iotWatch.ts
+  4c5b675c683fbb53 80-88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.8.1",
+  "base_commit_sha": "e571d5e6749155c0c9dbcfcef9c2384166e04ac0",
+  "prompts": {
+    "4c5b675c683fbb53": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9b8d194a-3b07-4f5a-b48c-7554b28d133f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "pengjun5437513 <pengjun@cvte.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 1808,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/5e61eb2bcc3b4df9c4c83c10ee54934a96b39769e161c67e01404982f430a95c"
+    }
+  }
+}
