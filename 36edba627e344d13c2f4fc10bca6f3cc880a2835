@@ -1,0 +1,32 @@
+src/lib/siliconflowStt.ts
+  4c5b675c683fbb53 8-15,20-45,51,64-66,68-124,136,160-161,164
+src/services/quota.ts
+  4c5b675c683fbb53 155-170
+src/routes/ai.ts
+  4c5b675c683fbb53 12-17,1468,1471,1485-1487
+tests/stt-hedge.test.ts
+  4c5b675c683fbb53 1-113
+src/lib/sttInputValidation.ts
+  4c5b675c683fbb53 5-14,16-19,25-30,64,71,76,91
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.8.1",
+  "base_commit_sha": "36edba627e344d13c2f4fc10bca6f3cc880a2835",
+  "prompts": {
+    "4c5b675c683fbb53": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9b8d194a-3b07-4f5a-b48c-7554b28d133f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "pengjun5437513 <pengjun@cvte.com>",
+      "messages": [],
+      "total_additions": 2123,
+      "total_deletions": 273,
+      "accepted_lines": 2038,
+      "overriden_lines": 36,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/23dc8d40bb0cfad37e60194114e01e531fcd3603b38e9b83317c28251c408c3c"
+    }
+  }
+}
