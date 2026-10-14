@@ -53,6 +53,14 @@ export const RESP_MOTION_SLEEP_MAX = 0.1;
 export const RESP_MOTION_AWAKE = 0.35;
 /** 持续中等体动 ≥ 该 epoch 数判清醒 */
 export const RESP_RESTLESS_EPOCHS = 4;
+/** 大体动 epoch 之间间隔 ≤ 该数视为同一段动作 */
+export const MOVE_CLUSTER_GAP_EPOCHS = 2;
+/** 一次动作含大体动 epoch ≥ 该数才算醒来；1～2 个（≤1 分钟）是睡中翻身/挪头 */
+export const AWAKE_MOVE_EPOCHS = 3;
+/** 大体动后气囊受力改变、气压回稳的时长，期间的中等体动不算持续体动 */
+export const POST_MOVE_SETTLE_EPOCHS = 4;
+/** 夜醒次数只计 ≥ 该时长的清醒；更短的醒来通常不被记住 */
+export const RESP_AWAKENING_EPOCHS = 10;
 /** 离枕超过该时长视为两段独立睡眠（如午睡与夜间），取睡得最久的一段 */
 export const SESSION_GAP_EPOCHS = 120;
 /**
@@ -62,20 +70,20 @@ export const SESSION_GAP_EPOCHS = 120;
  */
 export const DEEP_QUANTILE = 0.8;
 export const DEEP_PROM_MIN = 30;
-export const DEEP_LATE_FACTOR = 1.5;
+export const DEEP_LATE_FACTOR = 0.5;
 export const DEEP_MOTION_MAX = 0.04;
 export const DEEP_MIN_EPOCHS = 10;
 /** 入睡后至少该时长才可能进入深睡 */
 export const DEEP_LATENCY_EPOCHS = 20;
 /**
- * REM：入睡 ≥60 分钟后、身体静止、呼吸幅度够（头压实、信号在）但规律性处于当晚低位。
- * 幅度小而无峰是信号弱，不判 REM。
+ * REM：入睡 ≥45 分钟后、身体静止、呼吸幅度够（头压实、信号在）但规律性处于当晚低位。
+ * 幅度小而无峰是信号弱，不判 REM；大体动后的回稳期不判 REM。
  */
-export const REM_QUANTILE = 0.4;
-export const REM_PROM_MAX = 20;
+export const REM_QUANTILE = 0.5;
+export const REM_PROM_MAX = 25;
 export const REM_AMP_MIN = 3;
 export const REM_MIN_EPOCHS = 6;
-export const REM_LATENCY_EPOCHS = 120;
+export const REM_LATENCY_EPOCHS = 90;
 /** 同类分期之间 ≤ 该 epoch 数的浅睡空隙并入（防碎片化） */
 export const STAGE_GAP_FILL_EPOCHS = 2;
 
@@ -350,6 +358,26 @@ function smoothedProm(epochs: SleepEpoch[], i: number): number {
   return median(vals);
 }
 
+/** 大体动按间隔聚成一次次动作，只有持续够长的动作标为清醒 */
+function markMovementWake(awake: boolean[], from: number, to: number, moving: (i: number) => boolean): void {
+  let i = from;
+  while (i < to) {
+    if (!moving(i)) {
+      i += 1;
+      continue;
+    }
+    let last = i;
+    let count = 0;
+    for (let j = i; j < to && j - last <= MOVE_CLUSTER_GAP_EPOCHS + 1; j += 1) {
+      if (!moving(j)) continue;
+      last = j;
+      count += 1;
+    }
+    if (count >= AWAKE_MOVE_EPOCHS) for (let k = i; k <= last; k += 1) awake[k] = true;
+    i = last + 1;
+  }
+}
+
 /** 把短于 minLen 的 target 段改成 fallback */
 function dropShortRuns(stages: EpochStage[], from: number, to: number, target: EpochStage, minLen: number, fallback: EpochStage): void {
   let i = from;
@@ -543,13 +571,19 @@ function classifyRespSession(
   const { actuator, breathing, contact } = sig;
   const sleepLen = Math.max(1, wakeIdx - onsetIdx);
   const awake = ordered.map(() => false);
+  const moving = (i: number) => contact[i]! && !actuator[i] && ordered[i]!.motion >= RESP_MOTION_AWAKE;
+  const settling = ordered.map(() => false);
+  for (let i = onsetIdx; i < wakeIdx; i += 1) {
+    if (!moving(i)) continue;
+    for (let k = i + 1; k <= Math.min(wakeIdx - 1, i + POST_MOVE_SETTLE_EPOCHS); k += 1) settling[k] = true;
+  }
   markBouts(awake, onsetIdx, wakeIdx, (i) => !contact[i], 1);
-  markBouts(awake, onsetIdx, wakeIdx, (i) => contact[i]! && !actuator[i] && ordered[i]!.motion >= RESP_MOTION_AWAKE, 1);
+  markMovementWake(awake, onsetIdx, wakeIdx, moving);
   markBouts(
     awake,
     onsetIdx,
     wakeIdx,
-    (i) => contact[i]! && !actuator[i] && ordered[i]!.motion >= RESP_MOTION_SLEEP_MAX,
+    (i) => contact[i]! && !actuator[i] && !settling[i] && ordered[i]!.motion >= RESP_MOTION_SLEEP_MAX,
     RESP_RESTLESS_EPOCHS,
   );
 
@@ -571,8 +605,10 @@ function classifyRespSession(
     const prom = smoothedProm(ordered, i);
     const deepGate = deepBase * (1 + DEEP_LATE_FACTOR * pos);
     if (i - onsetIdx >= DEEP_LATENCY_EPOCHS && prom >= deepGate && e.motion < DEEP_MOTION_MAX) stages[i] = 'deep';
+    // 呼吸特征取尾随 120s 窗口：翻身后窗口内含体动，显著度低、幅度高，形似 REM
     else if (
       i - onsetIdx >= REM_LATENCY_EPOCHS &&
+      !settling[i] &&
       prom < remGate &&
       (e.respAmp ?? 0) >= REM_AMP_MIN &&
       e.motion < RESP_MOTION_SLEEP_MAX
@@ -606,7 +642,7 @@ function classifyRespSession(
     onsetIdx,
     wakeIdx,
     (i) => stages[i] === 'wake' || stages[i] === 'off',
-    WASO_EPOCHS,
+    RESP_AWAKENING_EPOCHS,
   );
 
   const durationMinutes = minutesFromEpochs(deep + light + rem);

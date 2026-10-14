@@ -191,6 +191,18 @@ describe('气压呼吸分期（cis_ip）', () => {
     assert.equal(estimate.avgBreathRate, 15);
   });
 
+  test('睡中单次翻身不算醒；几分钟内反复翻动算一次夜醒', () => {
+    const tossing: Array<[Kind, number]> = [];
+    for (const kind of 'RSSRSSRSSRSR') tossing.push([kind === 'R' ? 'restless' : 'sleep', 1]);
+    const epochs = night([['empty', 20], ['sleep', 150], ['restless', 2], ['sleep', 60], ...tossing, ['sleep', 60], ['empty', 60]]);
+    const { estimate, stages } = classifyPillowNight(epochs, '2026-09-10', 'cis_ip');
+    assert.equal(stages[170]!.stage, 'light');
+    assert.equal(stages[173]!.stage, 'light');
+    for (let i = 232; i < 244; i += 1) assert.equal(stages[i]!.stage, 'wake', `epoch ${i}`);
+    assert.equal(estimate.awakenings, 1);
+    assert.equal(estimate.awakeMinutes, 6);
+  });
+
   test('无呼吸特征的旧 epoch 仍走体动算法', () => {
     const epochs = night([['empty', 10], ['sleep', 60], ['empty', 30]]).map((e) => ({
       ...e,
