@@ -1,0 +1,26 @@
+src/services/iotSleepEstimate.ts
+  4c5b675c683fbb53 79-80,82-83,86,361-380,574-579,581,586,608,611
+tests/iot-sleep-respiration.test.ts
+  4c5b675c683fbb53 194-205
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.8.1",
+  "base_commit_sha": "5334cf98d2a35dc2e0164298b791ffd32b7a6e69",
+  "prompts": {
+    "4c5b675c683fbb53": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9b8d194a-3b07-4f5a-b48c-7554b28d133f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "pengjun5437513 <pengjun@cvte.com>",
+      "messages": [],
+      "total_additions": 16,
+      "total_deletions": 2,
+      "accepted_lines": 16,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/a510f7a5572b0bd2c59c57703be2a780a3a13f94778fe4cc37359ec98b0afc8c"
+    }
+  }
+}
