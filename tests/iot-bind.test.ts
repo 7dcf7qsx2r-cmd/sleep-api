@@ -362,6 +362,37 @@ describe('iot bind', { concurrency: false }, () => {
     );
   });
 
+  test('admin release frees a pillow bound to another account', async () => {
+    const sn = '14639369AABB';
+    await iot.bindIotDevice({ userId: USER_A, sn, model: 'CIS-IP' });
+    await query(
+      `INSERT INTO iot_messages (product_key, sn, topic, raw_json)
+       VALUES ('cis_ip', $1, '/sys/cis_ip/' || $1 || '/thing/property/post', '{"keep":true}'::jsonb)`,
+      [sn],
+    );
+    await assert.rejects(
+      () => iot.bindIotDevice({ userId: USER_B, sn, model: 'CIS-IP' }),
+      (err: unknown) => err instanceof iot.IotBindError && err.code === 'already_bound',
+    );
+
+    const released = await iot.releaseIotBinding(sn.toLowerCase());
+    assert.equal(released.sn, sn);
+    assert.equal(released.removed, 1);
+    assert.deepEqual(released.productKeys, ['cis_ip']);
+
+    const kept = await query<{ n: string }>(
+      `SELECT COUNT(*)::text AS n FROM iot_messages WHERE sn = $1`,
+      [sn],
+    );
+    assert.equal(kept.rows[0]?.n, '1');
+    const rebound = await iot.bindIotDevice({ userId: USER_B, sn, model: 'CIS-IP' });
+    assert.equal(rebound.sn, sn);
+    await assert.rejects(
+      () => iot.releaseIotBinding('ABC'),
+      (err: unknown) => err instanceof iot.IotBindError && err.code === 'invalid_sn',
+    );
+  });
+
   test('unbind removes ownership', async () => {
     await iot.unbindIotDevice(USER_A, 'SNDEMO0001');
     await assert.rejects(

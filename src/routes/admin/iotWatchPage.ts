@@ -35,6 +35,7 @@ export const IOT_WATCH_HTML = `<!DOCTYPE html>
     }
     button { cursor: pointer; }
     button.primary { background: #1d4d3b; border-color: #2e7a5c; }
+    button.danger { background: #4a2428; border-color: #8a3d44; color: #ffd0d0; }
     button:disabled { opacity: .55; cursor: default; }
     main { flex: 1; display: grid; grid-template-rows: auto 1fr; min-height: 0; }
     .toolbar { padding: 10px 16px; border-bottom: 1px solid var(--line); }
@@ -48,9 +49,11 @@ export const IOT_WATCH_HTML = `<!DOCTYPE html>
     .chip .dot.live, .hit .dot.live { background: var(--occ); }
     .hits { margin-top: 8px; display: grid; gap: 6px; max-height: 240px; overflow: auto; }
     .hit {
-      display: block; width: 100%; text-align: left; border: 1px solid var(--line);
-      border-radius: 10px; padding: 8px 10px; background: var(--panel); color: var(--text);
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      width: 100%; text-align: left; border: 1px solid var(--line);
+      border-radius: 10px; padding: 8px 10px; background: var(--panel); color: var(--text); cursor: pointer;
     }
+    .hit .body { flex: 1; min-width: 0; }
     .hit.on { border-color: #3ee0a3; }
     .hit .acc { color: var(--muted); font-size: 12px; margin-top: 2px; }
     input#q { min-width: 240px; flex: 1; }
@@ -87,7 +90,7 @@ export const IOT_WATCH_HTML = `<!DOCTYPE html>
   <header>
     <div>
       <h1>MQTT 实时监听</h1>
-      <div class="muted">只读云端入库包 · 不抢 MQTT 桥接</div>
+      <div class="muted">可解除账号绑定 · 不删历史上报，不抢 MQTT 桥接</div>
     </div>
     <div class="row">
       <span id="who" class="muted"></span>
@@ -106,6 +109,7 @@ export const IOT_WATCH_HTML = `<!DOCTYPE html>
       <div class="row" style="margin-top:8px">
         <input id="q" placeholder="搜设备 SN / 手机号 / 微信号 / 昵称" />
         <button id="search">搜索</button>
+        <button id="unbind" class="danger">解除绑定</button>
       </div>
       <div id="hits" class="hits"></div>
       <div id="chips" class="chips"></div>
@@ -245,6 +249,22 @@ export const IOT_WATCH_HTML = `<!DOCTYPE html>
       return bits.length ? '绑定：' + bits.join(' · ') : '已绑定';
     }
 
+    async function unbindSn(sn, account) {
+      const id = String(sn || '').trim().toUpperCase();
+      if (!id) {
+        setMeta('先填写要解绑的设备 SN');
+        return;
+      }
+      const who = account ? ('\\n' + account) : '';
+      if (!window.confirm('解除 ' + id + ' 与账号的绑定？' + who + '\\n历史报文保留，这台设备可以重新绑定。')) return;
+      const data = await api('/admin/iot-watch/unbind', {
+        method: 'POST',
+        body: JSON.stringify({ sn: id }),
+      });
+      setMeta(id + ' 已解绑 ' + data.removed + ' 条');
+      searchDevices().catch(function () {});
+    }
+
     function renderHits(items) {
       hitsEl.innerHTML = '';
       if (!items || !items.length) {
@@ -252,12 +272,26 @@ export const IOT_WATCH_HTML = `<!DOCTYPE html>
         return;
       }
       items.forEach(function (d) {
-        const b = document.createElement('button');
+        const b = document.createElement('div');
         b.className = 'hit' + (d.sn === snEl.value ? ' on' : '');
-        b.innerHTML = '<div><span class="dot' + (d.online ? ' live' : '') + '"></span>' +
+        const body = document.createElement('div');
+        body.className = 'body';
+        body.innerHTML = '<div><span class="dot' + (d.online ? ' live' : '') + '"></span>' +
           esc(d.label) + ' <strong>' + esc(d.sn) + '</strong>' +
           (d.alias ? ' · ' + esc(d.alias) : '') + '</div>' +
           '<div class="acc">' + esc(accountLine(d)) + '</div>';
+        b.appendChild(body);
+        if (d.bound) {
+          const act = document.createElement('button');
+          act.type = 'button';
+          act.className = 'danger';
+          act.textContent = '解绑';
+          act.onclick = function (ev) {
+            ev.stopPropagation();
+            unbindSn(d.sn, accountLine(d)).catch(function (e) { setMeta(e.message || String(e)); });
+          };
+          b.appendChild(act);
+        }
         b.onclick = function () {
           snEl.value = d.sn;
           startWatch();
@@ -399,6 +433,9 @@ export const IOT_WATCH_HTML = `<!DOCTYPE html>
     };
     document.getElementById('clear').onclick = function () { logEl.textContent = ''; };
     document.getElementById('search').onclick = function () { searchDevices().catch(function (e) { setMeta(e.message || String(e)); }); };
+    document.getElementById('unbind').onclick = function () {
+      unbindSn(snEl.value || qEl.value, '').catch(function (e) { setMeta(e.message || String(e)); });
+    };
     qEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') searchDevices().catch(function (err) { setMeta(err.message || String(err)); }); });
     snEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') startWatch(); });
     loadCred();

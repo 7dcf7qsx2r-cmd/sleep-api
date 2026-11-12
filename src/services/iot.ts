@@ -165,6 +165,32 @@ export async function unbindIotDevice(userId: string, sn: string, _productKey?: 
   }
 }
 
+/** 运营解绑：按序列号删掉账号占用。不删设备登记和历史上报。 */
+export async function releaseIotBinding(sn: string): Promise<{
+  sn: string;
+  removed: number;
+  productKeys: string[];
+}> {
+  const id = normalizeIotSn(sn);
+  if (!isValidIotSn(id)) {
+    throw new IotBindError('invalid_sn', '设备 SN 无效');
+  }
+  const { rows } = await query<{ product_key: string }>(
+    `DELETE FROM iot_device_bindings
+     WHERE sn = $1
+     RETURNING product_key`,
+    [id],
+  );
+  if (rows.length === 0) {
+    throw new IotBindError('not_bound', '这台设备当前没有绑定账号');
+  }
+  return {
+    sn: id,
+    removed: rows.length,
+    productKeys: rows.map((row) => row.product_key),
+  };
+}
+
 export async function listBoundIotDevices(userId: string): Promise<IotBinding[]> {
   const { rows } = await query<{
     product_key: string;

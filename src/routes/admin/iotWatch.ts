@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { requireAdminAuth, type AdminVariables } from '../../middleware/adminAuth.js';
 import { listWatchDevices, listWatchMessages, searchWatchBindings } from '../../services/iotWatch.js';
 import { getWatchSleepEpochs, getWatchSleepSummary } from '../../services/iotSleepEpochs.js';
-import { IotBindError } from '../../services/iot.js';
+import { IotBindError, releaseIotBinding } from '../../services/iot.js';
 import { sleepNightDate } from '../../utils/civilDate.js';
 import { IOT_WATCH_HTML } from './iotWatchPage.js';
 
@@ -56,6 +56,25 @@ adminIotWatchRoutes.get(
       const code = err instanceof Error ? err.message : '';
       if (code === 'invalid_sn' || code === 'invalid_after_id') {
         return c.json({ error: code, message: '参数无效' }, 400);
+      }
+      throw err;
+    }
+  },
+);
+
+adminIotWatchRoutes.post(
+  '/unbind',
+  requireAdminAuth,
+  zValidator('json', z.object({ sn: z.string().min(3).max(64) })),
+  async (c) => {
+    c.header('Cache-Control', 'no-store');
+    try {
+      const released = await releaseIotBinding(c.req.valid('json').sn);
+      return c.json({ ok: true, ...released });
+    } catch (err) {
+      if (err instanceof IotBindError) {
+        const status = err.code === 'not_bound' ? 404 : 400;
+        return c.json({ error: err.code, message: err.message }, status);
       }
       throw err;
     }
