@@ -1,0 +1,44 @@
+src/services/radarMqtt.ts
+  4c5b675c683fbb53 1-81
+src/routes/radar.ts
+  4c5b675c683fbb53 16,111-112,129-130
+tests/iot-watch.test.ts
+  4c5b675c683fbb53 116-128
+tests/iot-bind.test.ts
+  4c5b675c683fbb53 173-202
+tests/radar-mqtt.test.ts
+  4c5b675c683fbb53 1-55
+tests/garden-visit.test.ts
+  4c5b675c683fbb53 336-382
+src/services/iot.ts
+  4c5b675c683fbb53 178-179,185-192,295-302,318-325
+src/routes/ai.ts
+  4c5b675c683fbb53 390-393
+src/services/iotWatch.ts
+  4c5b675c683fbb53 10,93-103,135-137
+src/services/gardenHarvestCap.ts
+  4c5b675c683fbb53 1-17
+src/services/energyLedger.ts
+  4c5b675c683fbb53 9,361,388-398,605-618
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.8.2",
+  "base_commit_sha": "077210274b865954fc46b3aebb669b68b097612a",
+  "prompts": {
+    "4c5b675c683fbb53": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9b8d194a-3b07-4f5a-b48c-7554b28d133f",
+        "model": "grok-4.7"
+      },
+      "human_author": "pengjun5437513 <pengjun@cvte.com>",
+      "messages": [],
+      "total_additions": 320,
+      "total_deletions": 15,
+      "accepted_lines": 320,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/ef5e32fd4715d1fb6f7e56455cbd146cd71690b5b4fb536321a3a0c6800ca2cc"
+    }
+  }
+}
