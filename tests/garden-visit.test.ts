@@ -333,3 +333,50 @@ test('smash hits the same daily visit cap of 5', async () => {
   const left = await garden.getUserGarden(USER_A);
   assert.equal(left?.pests.some((p) => p.id === 'cap_5'), true);
 });
+
+test('garden harvest claims cap at 28 per Shanghai day', async () => {
+  const { claimReward } = await import('../src/services/energyLedger.js');
+  const { addCivilDays } = await import('../src/utils/civilDate.js');
+  const today = shanghaiToday();
+  const before = await ensureEnergyAccount(USER_A);
+  let earned = 0;
+  for (let i = 0; i < 5; i += 1) {
+    const result = await claimReward(
+      USER_A,
+      'dream_garden_harvest',
+      `garden:${today}:plot${i}:plant-${i}`,
+      7,
+      '深睡花园 · 月光露珠',
+    );
+    earned += result.earned;
+  }
+  assert.equal(earned, 28);
+  const replant = await claimReward(
+    USER_A,
+    'dream_garden_harvest',
+    `garden:${today}:plot0:replant`,
+    7,
+    '深睡花园 · 月光露珠',
+  );
+  assert.equal(replant.earned, 0);
+  const wrongDay = await claimReward(
+    USER_A,
+    'dream_garden_harvest',
+    `garden:${addCivilDays(today, -1)}:plot0:old`,
+    7,
+    '深睡花园 · 月光露珠',
+  );
+  assert.equal(wrongDay.earned, 0);
+  const after = await ensureEnergyAccount(USER_A);
+  assert.equal(after.balance, before.balance + 28);
+
+  await ensureEnergyAccount(STRANGER);
+  const inflated = await claimReward(
+    STRANGER,
+    'dream_garden_harvest',
+    `garden:${today}:plot0:big`,
+    100,
+    '深睡花园 · 月光露珠',
+  );
+  assert.equal(inflated.earned, 7);
+});

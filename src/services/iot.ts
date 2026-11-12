@@ -175,17 +175,21 @@ export async function listBoundIotDevices(userId: string): Promise<IotBinding[]>
     last_seen_at: Date | null;
     property_seen_at: Date | null;
   }>(
+    // 每台设备沿 (sn, received_at) 取最近一条属性/实时报文。
+    // 不要对整张 iot_messages 做 GROUP BY，那会并行扫全表。
     `SELECT b.product_key, b.sn, b.alias, b.model, b.bound_at,
             d.last_seen_at,
             p.received_at AS property_seen_at
      FROM iot_device_bindings b
      LEFT JOIN iot_devices d ON d.sn = b.sn
-     LEFT JOIN (
-       SELECT sn, MAX(received_at) AS received_at
-       FROM iot_messages
-       WHERE topic LIKE '%/thing/property/post' OR topic LIKE '%/up/realtime'
-       GROUP BY sn
-     ) p ON p.sn = b.sn
+     LEFT JOIN LATERAL (
+       SELECT m.received_at
+       FROM iot_messages m
+       WHERE m.sn = b.sn
+         AND (m.topic LIKE '%/thing/property/post' OR m.topic LIKE '%/up/realtime')
+       ORDER BY m.received_at DESC
+       LIMIT 1
+     ) p ON true
      WHERE b.user_id = $1
      ORDER BY b.bound_at DESC`,
     [userId],
@@ -288,7 +292,14 @@ const REALTIME_PAYLOAD_FILTER = `(
   OR ${REALTIME_SCALAR_KEYS.map((k) => `${REALTIME_BODY}->'${k}' IS NOT NULL`).join('\n  OR ')}
 )`;
 
-/** 与 iotWatch 一致：以 iot_messages 流水为准，避免 latest 表未同步时 App 卡在旧物模型。 */
+/**
+ * 只在该设备最近若干条属性/实时报文里挑实时包。
+ * 直接在整表上按 JSON 过滤并排序会让优化器并行扫全表（实测约 0.7s）。
+ * 实时包大约每秒一条，中间夹少量睡眠/配置包，80 条覆盖得住。
+ */
+const REALTIME_LOOKBACK = 80;
+
+/** 以 iot_messages 流水为准，避免 latest 表未同步时 App 卡在旧物模型。 */
 async function getLatestRealtimeRow(sn: string): Promise<{
   product_key: string;
   sn: string;
@@ -304,8 +315,14 @@ async function getLatestRealtimeRow(sn: string): Promise<{
     received_at: Date;
   }>(
     `SELECT product_key, sn, topic, raw_json, received_at
-     FROM iot_messages
-     WHERE sn = $1 AND ${REALTIME_TOPIC_FILTER} AND ${REALTIME_PAYLOAD_FILTER}
+     FROM (
+       SELECT product_key, sn, topic, raw_json, received_at
+       FROM iot_messages
+       WHERE sn = $1 AND ${REALTIME_TOPIC_FILTER}
+       ORDER BY received_at DESC
+       LIMIT ${REALTIME_LOOKBACK}
+     ) recent
+     WHERE ${REALTIME_PAYLOAD_FILTER}
      ORDER BY
        CASE WHEN topic LIKE '%/thing/property/post' THEN 0 ELSE 1 END,
        received_at DESC

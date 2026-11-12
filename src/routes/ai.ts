@@ -387,8 +387,10 @@ const COMPANION_STYLE_ROUTE_SYSTEM = `你是小眠 Tab 的「对话意图与风�
 3. 一般“为什么/是什么/原理/方法” → explain，即使句中出现失眠、焦虑。
 4. 个人症状 + 判断/处置/用药/就医诉求 → consult。
 5. 短承接语“嗯/然后呢/继续”可延续【上轮风格】，continuation=true；新诉求立即切换。
-6. 【健康摘要】只辅助风险判断，不替代本轮请求动作。
-7. 问卷偏好只在低置信模糊输入时作弱先验。
+6. 用户想放下话题（“算了/不问了/不想说了/换个话题/聊点别的/没事了”）且无 urgent → chat，continuation=false，即使【上轮风格】是 consult 或 explain。
+7. 消息里带【进行中的专业咨询】时：本轮在回答【小眠上一问】→ consult，continuation=true；闲聊、倾诉、离开话题 → chat；问一般原理 → explain。不要因为上轮是 consult 就默认 consult。
+8. 【健康摘要】只辅助风险判断，不替代本轮请求动作。
+9. 问卷偏好只在低置信模糊输入时作弱先验。
 
 输出纯 JSON，不要 markdown，不要解释：
 {"style":"chat|explain|consult","intent":"companionship|education|assessment|unknown","risk":"none|personal_health|urgent","confidence":0.86,"continuation":false,"reason":"30字内中文依据","redFlag":false}

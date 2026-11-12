@@ -170,6 +170,36 @@ describe('iot bind', { concurrency: false }, () => {
     assert.equal(listed.find((d) => d.sn === '14639369D06C')?.online, true);
   });
 
+  test('a burst of sleep-only posts does not hide the latest realtime', async () => {
+    await iot.bindIotDevice({ userId: USER_A, sn: '14639369CE30', model: 'CIS-IP' });
+    const realtimePayload = {
+      method: 'thing.property.post',
+      params: { deviceStatus: { person: 1, pressureLeft: 1600 } },
+    };
+    const sleepOnly = {
+      method: 'thing.property.post',
+      params: { deviceName: '14639369CE30', SleepReportNew: { moving: 0, person: 1, heartRate: 60 } },
+    };
+    await query(
+      `INSERT INTO iot_messages (product_key, sn, topic, raw_json, received_at)
+       VALUES ('cis_ip', '14639369CE30', '/sys/cis_ip/14639369CE30/thing/property/post', $1::jsonb, NOW() - INTERVAL '70 seconds')`,
+      [JSON.stringify(realtimePayload)],
+    );
+    for (let i = 0; i < 50; i += 1) {
+      await query(
+        `INSERT INTO iot_messages (product_key, sn, topic, raw_json, received_at)
+         VALUES ('cis_ip', '14639369CE30', '/sys/cis_ip/14639369CE30/thing/property/post', $1::jsonb, NOW() - ($2::int * INTERVAL '1 second'))`,
+        [JSON.stringify(sleepOnly), i],
+      );
+    }
+
+    const latest = await iot.getOwnedIotLatest(USER_A, '14639369CE30');
+    assert.equal(
+      (latest?.raw as { params?: { deviceStatus?: { pressureLeft?: number } } })?.params?.deviceStatus?.pressureLeft,
+      1600,
+    );
+  });
+
   test('newer sleep-only property post does not replace realtime', async () => {
     await iot.bindIotDevice({ userId: USER_A, sn: '14639369CE29', model: 'CIS-IP' });
     const realtimePayload = {

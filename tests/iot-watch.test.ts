@@ -113,6 +113,19 @@ describe('iot watch compact', () => {
     );
   });
 
+  test('BR mattress realtime shows bed, heart and breath', () => {
+    const params = { isbed: 1, heartRate: 94, respiratoryRate: 16, signal: 1 };
+    assert.equal(compactIotParams(params), '在床  HR=94  RR=16  signal=1');
+    assert.equal(
+      highlightIotParams('/sys/br_mattress/OMTY26011605/thing/property/post', params),
+      'occupied',
+    );
+    assert.equal(
+      highlightIotParams('/sys/br_mattress/OMTY26011605/thing/property/post', { isbed: 0, heartRate: 0 }),
+      'idle',
+    );
+  });
+
   test('short topic strips product prefix', () => {
     assert.equal(
       shortTopic('/sys/cis_ib/68EE8F4740BC/thing/property/post', '68EE8F4740BC', 'cis_ib'),

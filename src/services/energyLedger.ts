@@ -6,6 +6,7 @@ import {
   type EnergyAccountDto,
 } from './energy.js';
 import { shanghaiToday, shanghaiYesterday, toDateOnly } from '../utils/civilDate.js';
+import { clampGardenHarvestAmount, parseGardenHarvestDay } from './gardenHarvestCap.js';
 
 export interface EnergyTransactionDto {
   id: string;
@@ -357,7 +358,7 @@ export async function earnEnergy(
   amount: number,
   description: string,
   sourceId: string,
-  options?: { ignoreDailyCap?: boolean },
+  options?: { ignoreDailyCap?: boolean; gardenHarvestDay?: string },
 ): Promise<{ earned: number; account: EnergyAccountDto; duplicate?: boolean }> {
   if (amount <= 0) {
     const account = await ensureEnergyAccount(userId);
@@ -384,6 +385,17 @@ export async function earnEnergy(
       [userId],
     );
     let earn = amount;
+    if (options?.gardenHarvestDay) {
+      const sumRow = await client.query<{ total: number }>(
+        `SELECT COALESCE(SUM(amount), 0)::int AS total
+         FROM energy_transactions
+         WHERE user_id = $1
+           AND type = 'earn'
+           AND source_id LIKE $2`,
+        [userId, `claim:dream_garden_harvest:garden:${options.gardenHarvestDay}:%`],
+      );
+      earn = clampGardenHarvestAmount(earn, Number(sumRow.rows[0]?.total ?? 0));
+    }
     if (!options?.ignoreDailyCap) {
       const dailyEarned = accRow.rows[0]?.daily_earned ?? 0;
       const dailyCap = accRow.rows[0]?.daily_cap ?? 200;
@@ -590,6 +602,19 @@ export async function claimReward(
   }
   const fullSourceId = `claim:${claimType}:${sourceId}`;
   const ignoreDailyCap = options?.ignoreDailyCap ?? claimType === 'achievement';
-  const result = await earnEnergy(userId, amount, description, fullSourceId, { ignoreDailyCap });
+  let claimAmount = amount;
+  let gardenHarvestDay: string | undefined;
+  if (claimType === 'dream_garden_harvest') {
+    const day = parseGardenHarvestDay(sourceId);
+    if (day !== shanghaiToday()) {
+      return { earned: 0, account: await ensureEnergyAccount(userId) };
+    }
+    claimAmount = clampGardenHarvestAmount(amount, 0);
+    gardenHarvestDay = day;
+  }
+  const result = await earnEnergy(userId, claimAmount, description, fullSourceId, {
+    ignoreDailyCap,
+    gardenHarvestDay,
+  });
   return { earned: result.earned, account: result.account };
 }

@@ -7,6 +7,7 @@ export const IOT_WATCH_PRODUCT_LABEL: Record<string, string> = {
   cis_ib: '智能床垫',
   cis_iswb: '智能撑腰垫',
   cis_ip: '智能枕',
+  br_mattress: '小眠智能床垫-薄',
 };
 
 export interface IotWatchDevice {
@@ -89,6 +90,17 @@ export function compactIotParams(params: Record<string, unknown>): string {
   if (typeof params.firmwareVer === 'string' && params.firmwareVer) {
     bits.push(`fw=${params.firmwareVer}`);
   }
+  if (params.isbed != null || params.heartRate != null || params.respiratoryRate != null) {
+    const bed = params.isbed === 1 ? '在床'
+      : params.isbed === 0 ? '离床'
+        : params.isbed === 11 ? '分析中'
+          : params.isbed === 21 ? '异常'
+            : `isbed=${String(params.isbed)}`;
+    bits.push(bed);
+    if (params.heartRate != null) bits.push(`HR=${String(params.heartRate)}`);
+    if (params.respiratoryRate != null) bits.push(`RR=${String(params.respiratoryRate)}`);
+    if (params.signal != null) bits.push(`signal=${String(params.signal)}`);
+  }
   for (const key of Object.keys(params)) {
     if (key.startsWith('set') || key === 'socketStatus') {
       bits.push(`${key}=${JSON.stringify(params[key])}`);
@@ -120,6 +132,9 @@ export function highlightIotParams(
     return 'idle';
   }
   if (params.airbagsPerson != null || params.HR != null || params.heartData != null) return 'idle';
+  if (topic.includes('sleep_report')) return 'sleep';
+  if (params.isbed === 1 || (typeof params.heartRate === 'number' && params.heartRate > 0)) return 'occupied';
+  if (params.isbed === 0) return 'idle';
   return 'other';
 }
 

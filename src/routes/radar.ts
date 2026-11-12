@@ -13,6 +13,7 @@ import {
   type RadarRealtimeInput,
   type RadarReportInput,
 } from '../services/radar.js';
+import { forwardRadarUploads } from '../services/radarMqtt.js';
 
 export const radarRoutes = new Hono();
 
@@ -107,7 +108,8 @@ async function handleDatapost(c: Context) {
     .filter((x): x is RadarRealtimeInput => x !== null);
 
   const stored = await upsertRealtime(items);
-  console.log(`[radar] datapost stored=${stored}`);
+  const mqtt = await forwardRadarUploads('realtime', items);
+  console.log(`[radar] datapost stored=${stored} mqtt=${mqtt}`);
   return c.json({ ret: 0, msg: 'ok', stored });
 }
 
@@ -124,7 +126,8 @@ async function handleReportpost(c: Context) {
     .filter((x): x is RadarReportInput => x !== null);
 
   const stored = await upsertReports(items);
-  console.log(`[radar] reportpost stored=${stored}`);
+  const mqtt = await forwardRadarUploads('sleep_report', items);
+  console.log(`[radar] reportpost stored=${stored} mqtt=${mqtt}`);
   return c.json({ ret: 0, msg: 'ok', stored });
 }
 
