@@ -1,0 +1,30 @@
+src/routes/admin/iotWatch.ts
+  34ab9d09c2a8c987 7,65-83
+src/routes/admin/iotWatchPage.ts
+  34ab9d09c2a8c987 38,52-54,56,93,112,252-267,275,277-279,283-294,436-438
+tests/iot-bind.test.ts
+  34ab9d09c2a8c987 365-395
+src/services/iot.ts
+  34ab9d09c2a8c987 168-193
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.8.2",
+  "base_commit_sha": "ba1e1ff44f6ba4c85b4b049f289a7c701bcc6bc9",
+  "prompts": {
+    "34ab9d09c2a8c987": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9fc00ebb-367e-4f45-815b-3614dd1a1f66",
+        "model": "grok-4.7"
+      },
+      "human_author": "pengjun5437513 <pengjun@cvte.com>",
+      "messages": [],
+      "total_additions": 120,
+      "total_deletions": 6,
+      "accepted_lines": 120,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.gz.cvte.cn/cas/9076038b178d75616d836cfe85e14ae816887dc4e6332a386863666443b35d8a"
+    }
+  }
+}
